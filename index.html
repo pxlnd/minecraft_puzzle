@@ -1,58 +1,60 @@
 <!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Minecraft Puzzle</title>
-  <link rel="stylesheet" href="styles.css" />
-</head>
-<body>
-  <main class="game-root">
-    <section class="board" aria-label="Игровое поле">
-      <div class="board-inner dirt-texture"></div>
-    </section>
-    <section class="tray" aria-label="Ячейки для фигур">
-      <div class="tray-cell"></div>
-      <div class="tray-cell"></div>
-      <div class="tray-cell"></div>
-      <div class="tray-cell"></div>
-      <div class="tray-cell"></div>
-    </section>
-    <section class="cube-stage" aria-label="3D куб">
-      <div class="cube">
-        <div class="cube-face cube-face-front"></div>
-        <div class="cube-face cube-face-right"></div>
-        <div class="cube-face cube-face-top"></div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scene Builder</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #0f1218;
+        color: #ecf1f8;
+        font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+      }
+      .box {
+        background: #171c25;
+        border: 1px solid #2a2f3a;
+        border-radius: 12px;
+        padding: 24px;
+        width: min(560px, 92vw);
+      }
+      h1 {
+        margin: 0 0 12px;
+      }
+      p {
+        color: #99a3b5;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        margin-top: 16px;
+        flex-wrap: wrap;
+      }
+      a {
+        display: inline-block;
+        text-decoration: none;
+        color: #ecf1f8;
+        border: 1px solid #2a2f3a;
+        border-radius: 8px;
+        padding: 10px 14px;
+        background: #121722;
+      }
+      a:hover {
+        border-color: #43baff;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <h1>Local 2D Scene Builder</h1>
+      <p>Выберите режим: редактор для сборки сцены или runtime для просмотра JSON как игровой сцены.</p>
+      <div class="row">
+        <a href="./editor.html">Open Editor</a>
+        <a href="./runtime.html">Open Runtime</a>
       </div>
-    </section>
-  </main>
-  <aside class="control-panel" aria-label="Панель настройки расположения">
-    <h2>Layout</h2>
-    <label class="control-row">
-      <span>Board X <output data-value-for="board-x">0</output></span>
-      <input type="range" min="-120" max="120" value="0" data-control="board-x" />
-    </label>
-    <label class="control-row">
-      <span>Board Y <output data-value-for="board-y">120</output></span>
-      <input type="range" min="-120" max="120" value="120" data-control="board-y" />
-    </label>
-    <label class="control-row">
-      <span>Tray X <output data-value-for="tray-x">0</output></span>
-      <input type="range" min="-120" max="120" value="0" data-control="tray-x" />
-    </label>
-    <label class="control-row">
-      <span>Tray Y <output data-value-for="tray-y">1</output></span>
-      <input type="range" min="-120" max="120" value="1" data-control="tray-y" />
-    </label>
-    <label class="control-row">
-      <span>Cube X <output data-value-for="cube-x">18</output></span>
-      <input type="range" min="-120" max="120" value="18" data-control="cube-x" />
-    </label>
-    <label class="control-row">
-      <span>Cube Y <output data-value-for="cube-y">-104</output></span>
-      <input type="range" min="-120" max="120" value="-104" data-control="cube-y" />
-    </label>
-  </aside>
-  <script src="game.js"></script>
-</body>
+    </div>
+  </body>
 </html>

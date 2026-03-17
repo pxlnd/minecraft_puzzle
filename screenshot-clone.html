@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Level 11 Clone</title>
+  <style>
+    :root {
+      --w: 459px;
+      --h: 688px;
+      --px: 16px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #1e1e1e;
+      font-family: "Trebuchet MS", Arial, sans-serif;
+    }
+
+    .screen {
+      position: relative;
+      width: var(--w);
+      height: var(--h);
+      overflow: hidden;
+      background: url("./assets/reference.png") center/100% 100% no-repeat;
+      image-rendering: pixelated;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+    }
+
+    .board-inner {
+      position: absolute;
+      left: 46px;
+      top: 121px;
+      width: 369px;
+      height: 410px;
+      border-radius: 22px;
+      overflow: hidden;
+    }
+
+    .bottom-cells {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 8px;
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .cell {
+      position: relative;
+      width: 74px;
+      height: 74px;
+      border-radius: 16px;
+      border: 4px solid #6f3c1c;
+      background:
+        radial-gradient(circle at 30% 25%, rgba(255,255,255,.08), rgba(255,255,255,0) 42%),
+        radial-gradient(circle at 70% 75%, rgba(0,0,0,.12), rgba(0,0,0,0) 45%);
+      box-shadow:
+        inset 0 3px 0 rgba(255,255,255,.09),
+        inset 0 -2px 0 rgba(0,0,0,.24);
+    }
+
+    .cell::before {
+      content: "";
+      position: absolute;
+      left: 5px;
+      top: 5px;
+      display: block;
+      width: calc(100% - 10px);
+      height: calc(100% - 10px);
+      border-radius: 12px;
+      border: 2px solid rgba(86, 44, 20, .7);
+      background: rgba(0, 0, 0, 0.28);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+    }
+
+    .cube-wrap {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 46px;
+      height: 46px;
+      transform: translate(-50%, -50%);
+      perspective: 360px;
+      z-index: 2;
+      filter: drop-shadow(0 5px 3px rgba(0, 0, 0, 0.45));
+    }
+
+    .cube {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      transform-style: preserve-3d;
+      animation: spin 4s linear infinite;
+      transform: rotateX(-28deg) rotateY(0deg);
+    }
+
+    .cube.s2 { animation-delay: .12s; }
+    .cube.s3 { animation-delay: .24s; }
+    .cube.s4 { animation-delay: .36s; }
+
+    .face {
+      position: absolute;
+      inset: 0;
+      border: 1px solid rgba(0, 0, 0, 0.25);
+      backface-visibility: hidden;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+      image-rendering: pixelated;
+    }
+
+    .cube.stone .face {
+      background: url("./assets/block/minecraft_stone.png") center/cover no-repeat;
+    }
+
+    .cube.wood .face {
+      background: url("./assets/block/wood.webp") center/cover no-repeat;
+    }
+
+    .cube.glass .face {
+      border: 1px solid rgba(171, 228, 255, 0.55);
+      box-shadow:
+        inset 0 0 0 1px rgba(230, 248, 255, 0.45),
+        inset 0 0 16px rgba(120, 210, 255, 0.18);
+      background:
+        linear-gradient(135deg, rgba(220, 248, 255, 0.35), rgba(170, 225, 255, 0.1)),
+        repeating-linear-gradient(0deg, rgba(255,255,255,.12) 0 2px, rgba(255,255,255,0) 2px 6px);
+    }
+
+    .front  { transform: translateZ(23px); }
+    .back   { transform: rotateY(180deg) translateZ(23px); }
+    .right  { transform: rotateY(90deg) translateZ(23px); filter: brightness(.82); }
+    .left   { transform: rotateY(-90deg) translateZ(23px); filter: brightness(.72); }
+    .top    { transform: rotateX(90deg) translateZ(23px); filter: brightness(1.08); }
+    .bottom { transform: rotateX(-90deg) translateZ(23px); filter: brightness(.62); }
+
+    .badge {
+      position: absolute;
+      left: 6px;
+      top: 6px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.65);
+      background: rgba(0, 0, 0, 0.35);
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 18px;
+      text-align: center;
+      transform: scale(.58);
+      transform-origin: top left;
+      text-shadow: 0 1px 1px rgba(0, 0, 0, .6);
+    }
+
+    @keyframes spin {
+      from { transform: rotateX(-28deg) rotateY(0deg); }
+      to { transform: rotateX(-28deg) rotateY(360deg); }
+    }
+
+  </style>
+</head>
+<body>
+  <main class="screen" aria-label="Level 11 cloned screen">
+    <section class="board-inner">
+    </section>
+    <section class="bottom-cells" aria-label="Empty cells">
+      <div class="cell">
+        <div class="cube-wrap">
+          <div class="cube stone">
+            <div class="face front"><span class="badge">1</span></div>
+            <div class="face back"></div>
+            <div class="face right"></div>
+            <div class="face left"></div>
+            <div class="face top"></div>
+            <div class="face bottom"></div>
+          </div>
+        </div>
+      </div>
+      <div class="cell">
+        <div class="cube-wrap">
+          <div class="cube wood s2">
+            <div class="face front"><span class="badge">2</span></div>
+            <div class="face back"></div>
+            <div class="face right"></div>
+            <div class="face left"></div>
+            <div class="face top"></div>
+            <div class="face bottom"></div>
+          </div>
+        </div>
+      </div>
+      <div class="cell">
+        <div class="cube-wrap">
+          <div class="cube glass s3">
+            <div class="face front"><span class="badge">3</span></div>
+            <div class="face back"></div>
+            <div class="face right"></div>
+            <div class="face left"></div>
+            <div class="face top"></div>
+            <div class="face bottom"></div>
+          </div>
+        </div>
+      </div>
+      <div class="cell">
+      </div>
+    </section>
+  </main>
+
+</body>
+</html>

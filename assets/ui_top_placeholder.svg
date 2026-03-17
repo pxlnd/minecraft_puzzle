@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="220" viewBox="0 0 1024 220">
+  <rect x="300" y="18" width="260" height="88" rx="24" fill="#2c8fd7" stroke="#1a2f45" stroke-width="8"/>
+  <text x="430" y="74" text-anchor="middle" font-family="Arial, sans-serif" font-size="46" font-weight="700" fill="#ffffff">Level 11</text>
+
+  <rect x="650" y="24" width="250" height="80" rx="22" fill="#2a2a2a" stroke="#1a1a1a" stroke-width="6"/>
+  <circle cx="700" cy="64" r="30" fill="#e0ad2f"/>
+  <text x="790" y="74" text-anchor="middle" font-family="Arial, sans-serif" font-size="48" font-weight="700" fill="#ffffff">1400</text>
+  <rect x="892" y="36" width="56" height="56" rx="10" fill="#dd9f23" stroke="#8a5d16" stroke-width="4"/>
+  <text x="920" y="74" text-anchor="middle" font-family="Arial, sans-serif" font-size="38" font-weight="700" fill="#fff">+</text>
+
+  <rect x="432" y="88" width="72" height="96" rx="18" fill="#ef4b4b" stroke="#9d1919" stroke-width="6"/>
+  <circle cx="468" cy="190" r="22" fill="#ef4b4b" stroke="#9d1919" stroke-width="6"/>
+  <text x="468" y="147" text-anchor="middle" font-family="Arial, sans-serif" font-size="40" font-weight="700" fill="#ffffff">8</text>
+</svg>
