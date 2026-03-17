@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Minecraft Puzzle</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="game-root">
+    <section class="board" aria-label="Игровое поле">
+      <div class="board-inner dirt-texture"></div>
+    </section>
+    <section class="tray" aria-label="Ячейки для фигур">
+      <div class="tray-cell"></div>
+      <div class="tray-cell"></div>
+      <div class="tray-cell"></div>
+      <div class="tray-cell"></div>
+      <div class="tray-cell"></div>
+    </section>
+    <section class="cube-stage" aria-label="3D куб">
+      <div class="cube">
+        <div class="cube-face cube-face-front"></div>
+        <div class="cube-face cube-face-right"></div>
+        <div class="cube-face cube-face-top"></div>
+      </div>
+    </section>
+  </main>
+  <aside class="control-panel" aria-label="Панель настройки расположения">
+    <h2>Layout</h2>
+    <label class="control-row">
+      <span>Board X <output data-value-for="board-x">0</output></span>
+      <input type="range" min="-120" max="120" value="0" data-control="board-x" />
+    </label>
+    <label class="control-row">
+      <span>Board Y <output data-value-for="board-y">120</output></span>
+      <input type="range" min="-120" max="120" value="120" data-control="board-y" />
+    </label>
+    <label class="control-row">
+      <span>Tray X <output data-value-for="tray-x">0</output></span>
+      <input type="range" min="-120" max="120" value="0" data-control="tray-x" />
+    </label>
+    <label class="control-row">
+      <span>Tray Y <output data-value-for="tray-y">1</output></span>
+      <input type="range" min="-120" max="120" value="1" data-control="tray-y" />
+    </label>
+    <label class="control-row">
+      <span>Cube X <output data-value-for="cube-x">18</output></span>
+      <input type="range" min="-120" max="120" value="18" data-control="cube-x" />
+    </label>
+    <label class="control-row">
+      <span>Cube Y <output data-value-for="cube-y">-104</output></span>
+      <input type="range" min="-120" max="120" value="-104" data-control="cube-y" />
+    </label>
+  </aside>
+  <script src="game.js"></script>
+</body>
+</html>
