@@ -1286,6 +1286,16 @@
     getTotalCount() {
       return this.slots.length;
     }
+
+    setVisible(visible) {
+      const isVisible = Boolean(visible);
+      for (const mesh of this.builtMeshes) {
+        mesh.visible = isVisible;
+      }
+      if (this.shadowPlane) {
+        this.shadowPlane.visible = isVisible;
+      }
+    }
   }
 
   class RailDebugEditor {
@@ -2011,6 +2021,7 @@
       this.mouseNdc = new THREE.Vector2();
       this.hoverCell = null;
       this.boxSize = this.cellSize;
+      this.contentVisible = true;
       this._normalMatrix = new THREE.Matrix3();
       this._worldNormal = new THREE.Vector3();
       this._dominantNormal = new THREE.Vector3();
@@ -2054,12 +2065,19 @@
 
     setEnabled(value) {
       this.enabled = value;
-      this.grid.visible = value;
-      this.hoverMesh.visible = value && this.hoverCell !== null;
+      this.grid.visible = this.contentVisible && value;
+      this.hoverMesh.visible = this.contentVisible && value && this.hoverCell !== null;
     }
 
     isEnabled() {
       return this.enabled;
+    }
+
+    setVisible(value) {
+      this.contentVisible = Boolean(value);
+      this.group.visible = this.contentVisible;
+      this.grid.visible = this.contentVisible && this.enabled;
+      this.hoverMesh.visible = this.contentVisible && this.enabled && this.hoverCell !== null;
     }
 
     setType(type) {
@@ -2140,7 +2158,7 @@
     }
 
     updateHoverFromPointer(event) {
-      if (!this.enabled) {
+      if (!this.enabled || !this.contentVisible) {
         this.hoverCell = null;
         this.hoverMesh.visible = false;
         return;
@@ -2205,7 +2223,7 @@
     }
 
     updateHoverMesh() {
-      if (!this.hoverCell || !this.enabled) {
+      if (!this.hoverCell || !this.enabled || !this.contentVisible) {
         this.hoverMesh.visible = false;
         return;
       }
@@ -2380,6 +2398,9 @@
 
   function applyUiVisibility() {
     debugEditor.style.display = uiHidden ? 'none' : '';
+    const visible = !uiHidden;
+    editor.setVisible(visible);
+    buildManager.setVisible(visible);
   }
 
   function getEditorBlocksSnapshot() {
