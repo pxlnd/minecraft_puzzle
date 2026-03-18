@@ -40,10 +40,126 @@
     grass: loadTexture(TEXTURE_DATA.grass || './assets/grass.png', { pixelated: true }),
   };
 
-  const GROUND_GRASS_TEXTURE = loadTexture(TEXTURE_DATA.grass || './assets/grass.png', {
-    repeatX: 4,
-    repeatY: 4,
-  });
+  function pixelHash(x, y, seed = 0) {
+    const n = Math.sin((x + seed * 0.17) * 12.9898 + (y - seed * 0.11) * 78.233) * 43758.5453;
+    return n - Math.floor(n);
+  }
+
+  function createPixelCanvasTexture(size, draw) {
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    draw(ctx, size);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    if ('colorSpace' in texture) {
+      texture.colorSpace = THREE.SRGBColorSpace;
+    } else if ('encoding' in texture) {
+      texture.encoding = THREE.sRGBEncoding;
+    }
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    texture.generateMipmaps = false;
+    return texture;
+  }
+
+  function paintPaletteNoise(ctx, size, palette, seed) {
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        const n = pixelHash(x, y, seed);
+        const idx = Math.min(palette.length - 1, Math.floor(n * palette.length));
+        ctx.fillStyle = palette[idx];
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+  }
+
+  function createMinecraftGroundTextureSet() {
+    const size = 16;
+    const grassTopPalette = ['#4f8e45', '#5d9b4f', '#6aa85a', '#4a833f', '#78b766'];
+    const grassSidePalette = ['#4a8a42', '#5c9a4f', '#6cab5f', '#3f7b38'];
+    const dirtPalette = ['#5f452f', '#6d5036', '#7a5a3d', '#815f41', '#523c2a'];
+
+    const top = createPixelCanvasTexture(size, (ctx) => {
+      paintPaletteNoise(ctx, size, grassTopPalette, 13);
+      for (let y = 0; y < size; y += 1) {
+        for (let x = 0; x < size; x += 1) {
+          const patch = pixelHash(x, y, 29);
+          if (patch > 0.9) {
+            ctx.fillStyle = '#85c870';
+            ctx.fillRect(x, y, 1, 1);
+          } else if (patch < 0.06) {
+            ctx.fillStyle = '#3f7437';
+            ctx.fillRect(x, y, 1, 1);
+          }
+        }
+      }
+    });
+
+    const side = createPixelCanvasTexture(size, (ctx) => {
+      paintPaletteNoise(ctx, size, dirtPalette, 41);
+      for (let x = 0; x < size; x += 1) {
+        const dripDepth = 2 + Math.floor(pixelHash(x, 0, 77) * 3);
+        for (let y = 0; y < dripDepth; y += 1) {
+          if (y === 0 || pixelHash(x, y, 85) > 0.22) {
+            const n = pixelHash(x, y, 93);
+            const idx = Math.min(grassSidePalette.length - 1, Math.floor(n * grassSidePalette.length));
+            ctx.fillStyle = grassSidePalette[idx];
+            ctx.fillRect(x, y, 1, 1);
+          }
+        }
+      }
+    });
+
+    const bottom = createPixelCanvasTexture(size, (ctx) => {
+      paintPaletteNoise(ctx, size, dirtPalette, 57);
+    });
+
+    return { top, side, bottom };
+  }
+
+  const GROUND_TEXTURE_SET = createMinecraftGroundTextureSet();
+
+  function createMinecraftTreeTextureSet() {
+    const size = 16;
+    const barkPalette = ['#5a4630', '#6a5338', '#7a6140', '#483926', '#34291c'];
+    const leavesPalette = ['#245f2a', '#2f7635', '#3a8a41', '#1f5424', '#4a9b50'];
+
+    const trunk = createPixelCanvasTexture(size, (ctx) => {
+      paintPaletteNoise(ctx, size, barkPalette, 133);
+      for (let x = 0; x < size; x += 1) {
+        if (pixelHash(x, 0, 149) > 0.64) {
+          for (let y = 0; y < size; y += 1) {
+            if (pixelHash(x, y, 163) > 0.18) {
+              ctx.fillStyle = '#2a2117';
+              ctx.fillRect(x, y, 1, 1);
+            }
+          }
+        }
+      }
+    });
+
+    const leaves = createPixelCanvasTexture(size, (ctx) => {
+      ctx.clearRect(0, 0, size, size);
+      for (let y = 0; y < size; y += 1) {
+        for (let x = 0; x < size; x += 1) {
+          const gap = pixelHash(x, y, 191);
+          if (gap > 0.84) {
+            continue;
+          }
+          const n = pixelHash(x, y, 173);
+          const idx = Math.min(leavesPalette.length - 1, Math.floor(n * leavesPalette.length));
+          ctx.fillStyle = leavesPalette[idx];
+          ctx.fillRect(x, y, 1, 1);
+        }
+      }
+    });
+
+    return { trunk, leaves };
+  }
+
+  const TREE_TEXTURE_SET = createMinecraftTreeTextureSet();
   const DEFAULT_EDITOR_LEVEL = {
     blocks: [
       { type: 'stone', x: 6, y: 0, z: -3 },
@@ -72,6 +188,234 @@
 
   function easeInOutCubic(t) {
     return t < 0.5 ? 4 * t * t * t : 1 - ((-2 * t + 2) ** 3) / 2;
+  }
+
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  function smoothStep(t) {
+    return t * t * (3 - 2 * t);
+  }
+
+  function hashNoise2D(x, z) {
+    const n = Math.sin(x * 127.1 + z * 311.7) * 43758.5453123;
+    return n - Math.floor(n);
+  }
+
+  function valueNoise2D(x, z) {
+    const x0 = Math.floor(x);
+    const z0 = Math.floor(z);
+    const x1 = x0 + 1;
+    const z1 = z0 + 1;
+    const tx = smoothStep(x - x0);
+    const tz = smoothStep(z - z0);
+    const a = lerp(hashNoise2D(x0, z0), hashNoise2D(x1, z0), tx);
+    const b = lerp(hashNoise2D(x0, z1), hashNoise2D(x1, z1), tx);
+    return lerp(a, b, tz);
+  }
+
+  function createGroundBlockMaterial() {
+    const side = new THREE.MeshStandardMaterial({
+      map: GROUND_TEXTURE_SET.side,
+      color: 0xffffff,
+      roughness: 0.96,
+      metalness: 0,
+    });
+    const top = new THREE.MeshStandardMaterial({
+      map: GROUND_TEXTURE_SET.top,
+      color: 0xffffff,
+      roughness: 0.94,
+      metalness: 0,
+    });
+    const bottom = new THREE.MeshStandardMaterial({
+      map: GROUND_TEXTURE_SET.bottom,
+      color: 0xffffff,
+      roughness: 0.98,
+      metalness: 0,
+    });
+
+    return [side, side, top, bottom, side, side];
+  }
+
+  function createTreeMaterials() {
+    const trunk = new THREE.MeshStandardMaterial({
+      map: TREE_TEXTURE_SET.trunk,
+      color: 0xffffff,
+      roughness: 0.95,
+      metalness: 0,
+    });
+    const leaves = new THREE.MeshStandardMaterial({
+      map: TREE_TEXTURE_SET.leaves,
+      color: 0xffffff,
+      roughness: 0.9,
+      metalness: 0,
+      transparent: true,
+      alphaTest: 0.35,
+    });
+    return { trunk, leaves };
+  }
+
+  function cellKey(x, z) {
+    return `${x}:${z}`;
+  }
+
+  function createVoxelTerrain(scene) {
+    const group = new THREE.Group();
+    const halfSize = 28;
+    const clearRadius = 11;
+    const minLayer = -1;
+    const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
+    const blockMaterial = createGroundBlockMaterial();
+    const transforms = [];
+    const topLayerMap = new Map();
+
+    for (let gx = -halfSize; gx <= halfSize; gx += 1) {
+      for (let gz = -halfSize; gz <= halfSize; gz += 1) {
+        const distance = Math.hypot(gx, gz);
+        const base = valueNoise2D(gx * 0.15, gz * 0.15);
+        const detail = valueNoise2D((gx + 73) * 0.31, (gz - 37) * 0.31);
+        const noiseHeight = Math.round((base * 0.72 + detail * 0.28 - 0.46) * 6);
+        let topLayer = distance <= clearRadius ? 0 : Math.max(0, noiseHeight);
+
+        if (distance > clearRadius) {
+          topLayer += Math.min(2, Math.floor((distance - clearRadius) * 0.12));
+        }
+        topLayerMap.set(cellKey(gx, gz), topLayer);
+
+        for (let y = minLayer; y < topLayer; y += 1) {
+          transforms.push({
+            x: gx + 0.5,
+            y: y + 0.5,
+            z: gz + 0.5,
+          });
+        }
+      }
+    }
+
+    const terrain = new THREE.InstancedMesh(blockGeometry, blockMaterial, transforms.length);
+    terrain.castShadow = false;
+    terrain.receiveShadow = true;
+    const matrix = new THREE.Matrix4();
+
+    for (let i = 0; i < transforms.length; i += 1) {
+      const t = transforms[i];
+      matrix.makeTranslation(t.x, t.y, t.z);
+      terrain.setMatrixAt(i, matrix);
+    }
+    terrain.instanceMatrix.needsUpdate = true;
+    group.add(terrain);
+    scene.add(group);
+    return {
+      group,
+      halfSize,
+      clearRadius,
+      topLayerMap,
+    };
+  }
+
+  function createVoxelTrees(scene, terrainData) {
+    const { halfSize, clearRadius, topLayerMap } = terrainData;
+    const { trunk: trunkMaterial, leaves: leavesMaterial } = createTreeMaterials();
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const trunkTransforms = [];
+    const leafTransforms = [];
+    const treeAnchors = [];
+    const minTreeDistance = 4;
+
+    for (let gx = -halfSize + 3; gx <= halfSize - 3; gx += 1) {
+      for (let gz = -halfSize + 3; gz <= halfSize - 3; gz += 1) {
+        const distance = Math.hypot(gx, gz);
+        if (distance <= clearRadius + 6 || distance >= halfSize - 2) {
+          continue;
+        }
+
+        if (hashNoise2D(gx * 0.71 + 17, gz * 0.71 - 9) < 0.92) {
+          continue;
+        }
+
+        let blocked = false;
+        for (const prev of treeAnchors) {
+          if (Math.abs(prev.x - gx) < minTreeDistance && Math.abs(prev.z - gz) < minTreeDistance) {
+            blocked = true;
+            break;
+          }
+        }
+        if (blocked) {
+          continue;
+        }
+
+        const topLayer = topLayerMap.get(cellKey(gx, gz));
+        if (topLayer === undefined) {
+          continue;
+        }
+
+        treeAnchors.push({ x: gx, z: gz });
+        const trunkHeight = 3 + Math.floor(hashNoise2D(gx * 1.31, gz * 1.31) * 2);
+
+        for (let i = 0; i < trunkHeight; i += 1) {
+          trunkTransforms.push({
+            x: gx + 0.5,
+            y: topLayer + i + 0.5,
+            z: gz + 0.5,
+          });
+        }
+
+        const crownLevels = [
+          { y: topLayer + trunkHeight, radius: 2 },
+          { y: topLayer + trunkHeight + 1, radius: 2 },
+          { y: topLayer + trunkHeight + 2, radius: 1 },
+          { y: topLayer + trunkHeight + 3, radius: 0 },
+        ];
+
+        for (const level of crownLevels) {
+          for (let dx = -level.radius; dx <= level.radius; dx += 1) {
+            for (let dz = -level.radius; dz <= level.radius; dz += 1) {
+              if (level.radius === 2 && Math.abs(dx) === 2 && Math.abs(dz) === 2) {
+                continue;
+              }
+              leafTransforms.push({
+                x: gx + dx + 0.5,
+                y: level.y + 0.5,
+                z: gz + dz + 0.5,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    const treeGroup = new THREE.Group();
+    const matrix = new THREE.Matrix4();
+
+    if (trunkTransforms.length > 0) {
+      const trunks = new THREE.InstancedMesh(geometry, trunkMaterial, trunkTransforms.length);
+      trunks.castShadow = true;
+      trunks.receiveShadow = true;
+      for (let i = 0; i < trunkTransforms.length; i += 1) {
+        const t = trunkTransforms[i];
+        matrix.makeTranslation(t.x, t.y, t.z);
+        trunks.setMatrixAt(i, matrix);
+      }
+      trunks.instanceMatrix.needsUpdate = true;
+      treeGroup.add(trunks);
+    }
+
+    if (leafTransforms.length > 0) {
+      const leaves = new THREE.InstancedMesh(geometry, leavesMaterial, leafTransforms.length);
+      leaves.castShadow = true;
+      leaves.receiveShadow = true;
+      for (let i = 0; i < leafTransforms.length; i += 1) {
+        const t = leafTransforms[i];
+        matrix.makeTranslation(t.x, t.y, t.z);
+        leaves.setMatrixAt(i, matrix);
+      }
+      leaves.instanceMatrix.needsUpdate = true;
+      treeGroup.add(leaves);
+    }
+
+    scene.add(treeGroup);
+    return treeGroup;
   }
 
   class RoundedRectTrackCurve extends THREE.Curve {
@@ -134,7 +478,7 @@
       }
       d -= this.lineZ;
 
-      const theta = -Math.PI + d / r;
+      const theta = Math.PI - d / r;
       return target.set(-halfW + r + r * Math.cos(theta), this.y, halfH - r + r * Math.sin(theta));
     }
 
@@ -143,6 +487,36 @@
       const before = this.getPoint(t - epsilon, new THREE.Vector3());
       const after = this.getPoint(t + epsilon, new THREE.Vector3());
       return target.copy(after).sub(before).normalize();
+    }
+  }
+
+  class OffsetTrackCurve extends THREE.Curve {
+    constructor(baseCurve, offset, yOffset = 0) {
+      super();
+      this.baseCurve = baseCurve;
+      this.offset = offset;
+      this.yOffset = yOffset;
+      this._point = new THREE.Vector3();
+      this._tangent = new THREE.Vector3();
+    }
+
+    getPoint(t, target = new THREE.Vector3()) {
+      const p = this.baseCurve.getPoint(t, this._point);
+      const tan = this.baseCurve.getTangent(t, this._tangent);
+      let nx = -tan.z;
+      let nz = tan.x;
+      const len = Math.hypot(nx, nz) || 1;
+      nx /= len;
+      nz /= len;
+      return target.set(
+        p.x + nx * this.offset,
+        p.y + this.yOffset,
+        p.z + nz * this.offset,
+      );
+    }
+
+    getTangent(t, target = new THREE.Vector3()) {
+      return this.baseCurve.getTangent(t, target);
     }
   }
 
@@ -165,20 +539,17 @@
     constructor(scene) {
       this.scene = scene;
 
-      this.outerWidth = 16.8;
-      this.outerHeight = 11.2;
-      this.outerRadius = 2.05;
-
-      this.innerWidth = 13.8;
-      this.innerHeight = 8.2;
-      this.innerRadius = 1.35;
-
       this.pathWidth = 15.3;
       this.pathHeight = 9.7;
       this.pathRadius = 1.7;
 
-      this.pathY = 0.32;
+      this.centerGroundWidth = 13.45;
+      this.centerGroundHeight = 7.85;
+      this.pathY = 0.2;
       this.blockLift = 0.55;
+      this.railGauge = 0.54;
+      this.railHeight = 0.08;
+      this.sleeperSpacing = 0.42;
 
       this.curve = new RoundedRectTrackCurve(this.pathWidth, this.pathHeight, this.pathRadius, this.pathY);
 
@@ -186,35 +557,8 @@
     }
 
     createMeshes() {
-      const ringShape = new THREE.Shape();
-      addRoundedRect(ringShape, this.outerWidth, this.outerHeight, this.outerRadius);
-
-      const holePath = new THREE.Path();
-      addRoundedRect(holePath, this.innerWidth, this.innerHeight, this.innerRadius);
-      ringShape.holes.push(holePath);
-
-      const contourGeometry = new THREE.ExtrudeGeometry(ringShape, {
-        depth: 0.58,
-        bevelEnabled: false,
-        curveSegments: 28,
-      });
-      contourGeometry.rotateX(-Math.PI * 0.5);
-      contourGeometry.translate(0, 0.02, 0);
-
-      const contour = new THREE.Mesh(
-        contourGeometry,
-        new THREE.MeshStandardMaterial({
-          color: 0xb8b8b8,
-          roughness: 0.72,
-          metalness: 0.06,
-        }),
-      );
-      contour.receiveShadow = true;
-      contour.castShadow = true;
-      this.scene.add(contour);
-
       const centerGround = new THREE.Mesh(
-        new THREE.PlaneGeometry(this.innerWidth - 0.35, this.innerHeight - 0.35),
+        new THREE.PlaneGeometry(this.centerGroundWidth, this.centerGroundHeight),
         new THREE.MeshStandardMaterial({ color: 0x8a4f2c, roughness: 0.92, metalness: 0.02 }),
       );
       centerGround.rotation.x = -Math.PI * 0.5;
@@ -222,13 +566,68 @@
       centerGround.receiveShadow = true;
       this.scene.add(centerGround);
 
-      const motionStrip = new THREE.Mesh(
-        new THREE.TubeGeometry(this.curve, 220, 0.11, 10, true),
-        new THREE.MeshStandardMaterial({ color: 0x7f7f7f, roughness: 0.8, metalness: 0.08 }),
+      const ballast = new THREE.Mesh(
+        new THREE.TubeGeometry(this.curve, 320, 0.44, 12, true),
+        new THREE.MeshStandardMaterial({ color: 0x5c4732, roughness: 0.96, metalness: 0.02 }),
       );
-      motionStrip.castShadow = false;
-      motionStrip.receiveShadow = true;
-      this.scene.add(motionStrip);
+      ballast.castShadow = false;
+      ballast.receiveShadow = true;
+      this.scene.add(ballast);
+
+      const sleepers = [];
+      const sleeperCount = Math.max(24, Math.round(this.curve.perimeter / this.sleeperSpacing));
+      for (let i = 0; i < sleeperCount; i += 1) {
+        const t = i / sleeperCount;
+        const point = this.curve.getPoint(t, new THREE.Vector3());
+        const tangent = this.curve.getTangent(t, new THREE.Vector3());
+        const nx = -tangent.z;
+        const nz = tangent.x;
+        const angle = Math.atan2(nx, nz);
+        sleepers.push({
+          x: point.x,
+          y: this.pathY - 0.05,
+          z: point.z,
+          angle,
+        });
+      }
+
+      const sleeperMesh = new THREE.InstancedMesh(
+        new THREE.BoxGeometry(0.74, 0.08, 0.16),
+        new THREE.MeshStandardMaterial({ color: 0x8b6b42, roughness: 0.95, metalness: 0.01 }),
+        sleepers.length,
+      );
+      sleeperMesh.castShadow = true;
+      sleeperMesh.receiveShadow = true;
+      const sleeperMatrix = new THREE.Matrix4();
+      const sleeperQuaternion = new THREE.Quaternion();
+      for (let i = 0; i < sleepers.length; i += 1) {
+        const s = sleepers[i];
+        sleeperQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), s.angle);
+        sleeperMatrix.compose(
+          new THREE.Vector3(s.x, s.y, s.z),
+          sleeperQuaternion,
+          new THREE.Vector3(1, 1, 1),
+        );
+        sleeperMesh.setMatrixAt(i, sleeperMatrix);
+      }
+      sleeperMesh.instanceMatrix.needsUpdate = true;
+      this.scene.add(sleeperMesh);
+
+      const railMaterial = new THREE.MeshStandardMaterial({
+        color: 0xc4c7cc,
+        roughness: 0.34,
+        metalness: 0.78,
+      });
+      const leftRailCurve = new OffsetTrackCurve(this.curve, this.railGauge * 0.5, this.railHeight);
+      const rightRailCurve = new OffsetTrackCurve(this.curve, -this.railGauge * 0.5, this.railHeight);
+      const leftRail = new THREE.Mesh(new THREE.TubeGeometry(leftRailCurve, 360, 0.045, 8, true), railMaterial);
+      const rightRail = new THREE.Mesh(new THREE.TubeGeometry(rightRailCurve, 360, 0.045, 8, true), railMaterial);
+      leftRail.castShadow = false;
+      leftRail.receiveShadow = true;
+      rightRail.castShadow = false;
+      rightRail.receiveShadow = true;
+      this.scene.add(leftRail);
+      this.scene.add(rightRail);
     }
 
     getPointAt(t, target = new THREE.Vector3()) {
@@ -938,10 +1337,13 @@
   camera.position.set(14.5, 16, 14.5);
   camera.lookAt(0, 0, 0);
 
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.62);
+  const ambientLight = new THREE.AmbientLight(0xffffff, 1.02);
   scene.add(ambientLight);
 
-  const directionalLight = new THREE.DirectionalLight(0xfff8e9, 0.92);
+  const hemiLight = new THREE.HemisphereLight(0xd9efff, 0x84ad62, 0.62);
+  scene.add(hemiLight);
+
+  const directionalLight = new THREE.DirectionalLight(0xfff8e9, 1.24);
   directionalLight.position.set(8, 18, 10);
   directionalLight.castShadow = true;
   directionalLight.shadow.mapSize.set(2048, 2048);
@@ -951,19 +1353,8 @@
   directionalLight.shadow.camera.bottom = -16;
   scene.add(directionalLight);
 
-  const worldGround = new THREE.Mesh(
-    new THREE.PlaneGeometry(48, 48),
-    new THREE.MeshStandardMaterial({
-      map: GROUND_GRASS_TEXTURE,
-      color: 0xffffff,
-      roughness: 0.98,
-      metalness: 0,
-    }),
-  );
-  worldGround.rotation.x = -Math.PI * 0.5;
-  worldGround.position.y = 0;
-  worldGround.receiveShadow = true;
-  scene.add(worldGround);
+  const terrainData = createVoxelTerrain(scene);
+  createVoxelTrees(scene, terrainData);
 
   const trackController = new TrackController(scene);
   const buildManager = new BuildManager(scene, {
