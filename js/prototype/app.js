@@ -50,8 +50,6 @@
     canvas.width = size;
     canvas.height = size;
     const ctx = canvas.getContext('2d');
-    draw(ctx, size);
-
     const texture = new THREE.CanvasTexture(canvas);
     if ('colorSpace' in texture) {
       texture.colorSpace = THREE.SRGBColorSpace;
@@ -61,6 +59,7 @@
     texture.magFilter = THREE.NearestFilter;
     texture.minFilter = THREE.NearestFilter;
     texture.generateMipmaps = false;
+    draw(ctx, size, canvas, texture);
     return texture;
   }
 
@@ -159,28 +158,179 @@
     return { trunk, leaves };
   }
 
+  function createMinecraftRailTextures() {
+    const size = 32;
+    const postProcessCornerTexture = (ctx2d) => {
+      const image = ctx2d.getImageData(0, 0, size, size);
+      const data = image.data;
+
+      const railHi = [225, 229, 234];
+      const railBase = [182, 188, 196];
+      const railLo = [133, 139, 147];
+
+      // Pass 1: snap semitransparent pixels to opaque and normalize gray rail tones.
+      for (let i = 0; i < data.length; i += 4) {
+        const a = data[i + 3];
+        if (a === 0) {
+          continue;
+        }
+        data[i + 3] = 255;
+
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        const isGray = max - min <= 14 && max >= 95;
+        if (!isGray) {
+          continue;
+        }
+
+        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        const tone = lum > 205 ? railHi : (lum < 140 ? railLo : railBase);
+        data[i] = tone[0];
+        data[i + 1] = tone[1];
+        data[i + 2] = tone[2];
+      }
+
+      // Pass 2: fill tiny pinholes inside sleepers/rails.
+      const src = new Uint8ClampedArray(data);
+      for (let y = 1; y < size - 1; y += 1) {
+        for (let x = 1; x < size - 1; x += 1) {
+          const idx = (y * size + x) * 4;
+          if (src[idx + 3] !== 0) {
+            continue;
+          }
+
+          let count = 0;
+          let sumR = 0;
+          let sumG = 0;
+          let sumB = 0;
+          for (let oy = -1; oy <= 1; oy += 1) {
+            for (let ox = -1; ox <= 1; ox += 1) {
+              if (ox === 0 && oy === 0) {
+                continue;
+              }
+              const nIdx = ((y + oy) * size + (x + ox)) * 4;
+              if (src[nIdx + 3] === 0) {
+                continue;
+              }
+              count += 1;
+              sumR += src[nIdx];
+              sumG += src[nIdx + 1];
+              sumB += src[nIdx + 2];
+            }
+          }
+
+          if (count >= 6) {
+            data[idx] = Math.round(sumR / count);
+            data[idx + 1] = Math.round(sumG / count);
+            data[idx + 2] = Math.round(sumB / count);
+            data[idx + 3] = 255;
+          }
+        }
+      }
+
+      ctx2d.putImageData(image, 0, 0);
+    };
+
+    const straight = createPixelCanvasTexture(size, (ctx) => {
+      ctx.clearRect(0, 0, size, size);
+
+      for (let y = 2; y < size; y += 8) {
+        ctx.fillStyle = '#5b432c';
+        ctx.fillRect(4, y, size - 8, 3);
+        ctx.fillStyle = '#8f6b42';
+        ctx.fillRect(5, y, size - 10, 1);
+        ctx.fillStyle = '#3f2f20';
+        ctx.fillRect(5, y + 2, size - 10, 1);
+      }
+
+      const railXs = [6, 26];
+      for (const x of railXs) {
+        ctx.fillStyle = '#b6bcc4';
+        ctx.fillRect(x - 1, 0, 3, size);
+        ctx.fillStyle = '#e1e5ea';
+        ctx.fillRect(x - 1, 0, 1, size);
+        ctx.fillStyle = '#858b93';
+        ctx.fillRect(x + 1, 0, 1, size);
+      }
+    });
+
+    const corner = createPixelCanvasTexture(size, (ctx, _size, _canvas, texture) => {
+      ctx.clearRect(0, 0, size, size);
+      const cx = 0;
+      const cy = 0;
+      const drawRailCurve = (radius, baseColor, hiColor, loColor) => {
+        for (let t = 0; t <= 1; t += 0.005) {
+          const theta = t * Math.PI * 0.5;
+          const x = Math.round(cx + radius * Math.cos(theta));
+          const y = Math.round(cy + radius * Math.sin(theta));
+          ctx.fillStyle = baseColor;
+          ctx.fillRect(x - 1, y - 1, 3, 3);
+          ctx.fillStyle = hiColor;
+          ctx.fillRect(x - 1, y - 1, 1, 3);
+          ctx.fillStyle = loColor;
+          ctx.fillRect(x + 1, y - 1, 1, 3);
+        }
+      };
+
+      // Keep the same offsets as straight rails (6 and 26 px from tile edges).
+      drawRailCurve(26, '#b6bcc4', '#e1e5ea', '#858b93');
+      drawRailCurve(6, '#b6bcc4', '#e1e5ea', '#858b93');
+
+      const tieAngles = [14, 28, 42, 56, 70];
+      const tieRadius = 16;
+      for (const deg of tieAngles) {
+        const theta = (deg * Math.PI) / 180;
+        const x = cx + tieRadius * Math.cos(theta);
+        const y = cy + tieRadius * Math.sin(theta);
+        const tx = -Math.sin(theta);
+        const ty = Math.cos(theta);
+        const nx = Math.cos(theta);
+        const ny = Math.sin(theta);
+
+        // Draw sleepers across the rail gauge (normal direction), with small thickness along tangent.
+        for (let s = -10; s <= 10; s += 1) {
+          for (let w = -1; w <= 1; w += 1) {
+            const px = Math.round(x + nx * s + tx * w);
+            const py = Math.round(y + ny * s + ty * w);
+            if (px < 0 || py < 0 || px >= size || py >= size) {
+              continue;
+            }
+            if (w < 0) {
+              ctx.fillStyle = '#8f6b42';
+            } else if (w > 0) {
+              ctx.fillStyle = '#3f2f20';
+            } else {
+              ctx.fillStyle = '#5b432c';
+            }
+            ctx.fillRect(px, py, 1, 1);
+          }
+        }
+      }
+
+      const overlaySrc = TEXTURE_DATA.railCornerOverlay;
+      if (typeof overlaySrc === 'string' && overlaySrc) {
+        const overlay = new Image();
+        overlay.onload = () => {
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(overlay, 0, 0, size, size);
+          postProcessCornerTexture(ctx);
+          texture.needsUpdate = true;
+        };
+        overlay.src = overlaySrc;
+      } else {
+        postProcessCornerTexture(ctx);
+      }
+    });
+
+    return { straight, corner };
+  }
+
   const TREE_TEXTURE_SET = createMinecraftTreeTextureSet();
-  const DEFAULT_EDITOR_LEVEL = {
-    blocks: [
-      { type: 'stone', x: 6, y: 0, z: -3 },
-      { type: 'stone', x: 6, y: 0, z: -2 },
-      { type: 'stone', x: 6, y: 0, z: -1 },
-      { type: 'stone', x: 6, y: 0, z: 0 },
-      { type: 'stone', x: 6, y: 0, z: 1 },
-      { type: 'stone', x: 6, y: 0, z: 2 },
-      { type: 'stone', x: -4, y: 0, z: 3 },
-      { type: 'stone', x: -3, y: 0, z: 3 },
-      { type: 'stone', x: -2, y: 0, z: 3 },
-      { type: 'stone', x: -1, y: 0, z: 3 },
-      { type: 'stone', x: 0, y: 0, z: 3 },
-      { type: 'stone', x: 1, y: 0, z: 3 },
-      { type: 'stone', x: 2, y: 0, z: 3 },
-      { type: 'stone', x: 3, y: 0, z: 3 },
-      { type: 'stone', x: 4, y: 0, z: 3 },
-      { type: 'stone', x: 5, y: 0, z: 3 },
-      { type: 'stone', x: 6, y: 0, z: 3 },
-    ],
-  };
+  const RAIL_TEXTURES = createMinecraftRailTextures();
+  const DEFAULT_EDITOR_LEVEL = { blocks: [] };
 
   function easeOutCubic(t) {
     return 1 - (1 - t) ** 3;
@@ -213,6 +363,27 @@
     const a = lerp(hashNoise2D(x0, z0), hashNoise2D(x1, z0), tx);
     const b = lerp(hashNoise2D(x0, z1), hashNoise2D(x1, z1), tx);
     return lerp(a, b, tz);
+  }
+
+  function normalizeAngle(a) {
+    let v = a;
+    while (v > Math.PI) v -= Math.PI * 2;
+    while (v < -Math.PI) v += Math.PI * 2;
+    return v;
+  }
+
+  function createRailTileMaterial(texture) {
+    return new THREE.MeshStandardMaterial({
+      map: texture,
+      color: 0xffffff,
+      roughness: 0.88,
+      metalness: 0.08,
+      transparent: true,
+      alphaTest: 0.3,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
   }
 
   function createGroundBlockMaterial() {
@@ -520,6 +691,203 @@
     }
   }
 
+  const RAIL_DIRECTIONS = [
+    { dx: 0, dz: -1 }, // north
+    { dx: 1, dz: 0 }, // east
+    { dx: 0, dz: 1 }, // south
+    { dx: -1, dz: 0 }, // west
+  ];
+
+  function rotateDirectionIndex(baseIndex, quarterTurns) {
+    return (baseIndex + quarterTurns + 4) % 4;
+  }
+
+  function directionIndexToPoint(x, z, dirIndex) {
+    const d = RAIL_DIRECTIONS[dirIndex];
+    return {
+      x: x + d.dx * 0.5,
+      z: z + d.dz * 0.5,
+    };
+  }
+
+  function pointKey(point) {
+    return `${point.x.toFixed(4)}:${point.z.toFixed(4)}`;
+  }
+
+  function buildRailPath(layout, y) {
+    const list = Array.isArray(layout) ? layout : [];
+    const segments = [];
+    const nodes = new Map();
+    const usedCells = new Set();
+
+    const addNodeRef = (point, segmentIndex, endIndex) => {
+      const key = pointKey(point);
+      let node = nodes.get(key);
+      if (!node) {
+        node = { key, x: point.x, z: point.z, links: [] };
+        nodes.set(key, node);
+      }
+      node.links.push({ segmentIndex, endIndex });
+      return key;
+    };
+
+    for (const item of list) {
+      const x = Math.round(Number(item.x));
+      const z = Math.round(Number(item.z));
+      if (!Number.isFinite(x) || !Number.isFinite(z)) {
+        continue;
+      }
+
+      const cellKey = `${x}:${z}`;
+      if (usedCells.has(cellKey)) {
+        continue;
+      }
+      usedCells.add(cellKey);
+
+      const type = item.type === 'corner' ? 'corner' : 'straight';
+      const quarterTurns = rotateDirectionIndex(0, Math.round((Number(item.yaw) || 0) / (Math.PI * 0.5)));
+
+      let dirA = 0;
+      let dirB = 2;
+      if (type === 'corner') {
+        // Base corner connects north + west; rotation aligns it to the chosen tile yaw.
+        dirA = rotateDirectionIndex(0, quarterTurns);
+        dirB = rotateDirectionIndex(3, quarterTurns);
+      } else {
+        // Base straight connects north + south.
+        dirA = rotateDirectionIndex(0, quarterTurns);
+        dirB = rotateDirectionIndex(2, quarterTurns);
+      }
+
+      const p0 = directionIndexToPoint(x, z, dirA);
+      const p1 = directionIndexToPoint(x, z, dirB);
+      const segment = {
+        type,
+        points: [p0, p1],
+        center: null,
+        nodeKeys: ['', ''],
+      };
+
+      if (type === 'corner') {
+        const dA = RAIL_DIRECTIONS[dirA];
+        const dB = RAIL_DIRECTIONS[dirB];
+        const sx = Math.sign(dA.dx + dB.dx);
+        const sz = Math.sign(dA.dz + dB.dz);
+        segment.center = { x: x + sx * 0.5, z: z + sz * 0.5 };
+      }
+
+      const segmentIndex = segments.length;
+      segment.nodeKeys[0] = addNodeRef(p0, segmentIndex, 0);
+      segment.nodeKeys[1] = addNodeRef(p1, segmentIndex, 1);
+      segments.push(segment);
+    }
+
+    if (segments.length < 2 || nodes.size < 2) {
+      return null;
+    }
+
+    for (const node of nodes.values()) {
+      if (node.links.length !== 2) {
+        return null;
+      }
+    }
+
+    const sortedKeys = Array.from(nodes.keys()).sort();
+    const startKey = sortedKeys[0];
+    let currentKey = startKey;
+    let prevSegmentIndex = -1;
+    const ordered = [];
+
+    for (let i = 0; i < segments.length + 1; i += 1) {
+      const node = nodes.get(currentKey);
+      if (!node) {
+        return null;
+      }
+      const link = node.links.find((entry) => entry.segmentIndex !== prevSegmentIndex);
+      if (!link) {
+        return null;
+      }
+
+      const seg = segments[link.segmentIndex];
+      const fromEnd = link.endIndex;
+      const toEnd = fromEnd === 0 ? 1 : 0;
+      const nextKey = seg.nodeKeys[toEnd];
+      ordered.push({ segment: seg, fromEnd, toEnd });
+
+      prevSegmentIndex = link.segmentIndex;
+      currentKey = nextKey;
+      if (currentKey === startKey) {
+        break;
+      }
+    }
+
+    if (currentKey !== startKey || ordered.length !== segments.length) {
+      return null;
+    }
+
+    const directed = ordered.map((entry) => {
+      const seg = entry.segment;
+      if (seg.type === 'straight') {
+        return { ...entry, length: 1 };
+      }
+      return { ...entry, length: Math.PI * 0.5 * 0.5 };
+    });
+
+    const totalLength = directed.reduce((sum, seg) => sum + seg.length, 0);
+    if (totalLength <= 0.0001) {
+      return null;
+    }
+
+    const pointAtDirected = (item, u) => {
+      const from = item.segment.points[item.fromEnd];
+      const to = item.segment.points[item.toEnd];
+      if (item.segment.type === 'straight') {
+        return {
+          x: lerp(from.x, to.x, u),
+          z: lerp(from.z, to.z, u),
+        };
+      }
+
+      const c = item.segment.center;
+      const a0 = Math.atan2(from.z - c.z, from.x - c.x);
+      const a1 = Math.atan2(to.z - c.z, to.x - c.x);
+      const delta = normalizeAngle(a1 - a0);
+      const a = a0 + delta * u;
+      return {
+        x: c.x + Math.cos(a) * 0.5,
+        z: c.z + Math.sin(a) * 0.5,
+      };
+    };
+
+    const path = {
+      perimeter: totalLength,
+      getPoint(t, target = new THREE.Vector3()) {
+        const wrapped = ((t % 1) + 1) % 1;
+        let d = wrapped * totalLength;
+
+        for (const seg of directed) {
+          if (d <= seg.length) {
+            const p = pointAtDirected(seg, seg.length > 0 ? d / seg.length : 0);
+            return target.set(p.x, y, p.z);
+          }
+          d -= seg.length;
+        }
+
+        const last = directed[directed.length - 1];
+        const p = pointAtDirected(last, 1);
+        return target.set(p.x, y, p.z);
+      },
+      getTangent(t, target = new THREE.Vector3()) {
+        const epsilon = 0.0005;
+        const before = this.getPoint(t - epsilon, TEMP_A);
+        const after = this.getPoint(t + epsilon, TEMP_B);
+        return target.copy(after).sub(before).normalize();
+      },
+    };
+
+    return path;
+  }
+
   function addRoundedRect(path, width, height, radius) {
     const hw = width * 0.5;
     const hh = height * 0.5;
@@ -549,85 +917,17 @@
       this.blockLift = 0.55;
       this.railGauge = 0.54;
       this.railHeight = 0.08;
-      this.sleeperSpacing = 0.42;
+      this.sleeperSpacing = 1.8;
 
-      this.curve = new RoundedRectTrackCurve(this.pathWidth, this.pathHeight, this.pathRadius, this.pathY);
+      this.defaultCurve = new RoundedRectTrackCurve(this.pathWidth, this.pathHeight, this.pathRadius, this.pathY);
+      this.curve = this.defaultCurve;
+      this.usingRailLayout = false;
 
       this.createMeshes();
     }
 
     createMeshes() {
-      const centerGround = new THREE.Mesh(
-        new THREE.PlaneGeometry(this.centerGroundWidth, this.centerGroundHeight),
-        new THREE.MeshStandardMaterial({ color: 0x8a4f2c, roughness: 0.92, metalness: 0.02 }),
-      );
-      centerGround.rotation.x = -Math.PI * 0.5;
-      centerGround.position.y = 0.03;
-      centerGround.receiveShadow = true;
-      this.scene.add(centerGround);
-
-      const ballast = new THREE.Mesh(
-        new THREE.TubeGeometry(this.curve, 320, 0.44, 12, true),
-        new THREE.MeshStandardMaterial({ color: 0x5c4732, roughness: 0.96, metalness: 0.02 }),
-      );
-      ballast.castShadow = false;
-      ballast.receiveShadow = true;
-      this.scene.add(ballast);
-
-      const sleepers = [];
-      const sleeperCount = Math.max(24, Math.round(this.curve.perimeter / this.sleeperSpacing));
-      for (let i = 0; i < sleeperCount; i += 1) {
-        const t = i / sleeperCount;
-        const point = this.curve.getPoint(t, new THREE.Vector3());
-        const tangent = this.curve.getTangent(t, new THREE.Vector3());
-        const nx = -tangent.z;
-        const nz = tangent.x;
-        const angle = Math.atan2(nx, nz);
-        sleepers.push({
-          x: point.x,
-          y: this.pathY - 0.05,
-          z: point.z,
-          angle,
-        });
-      }
-
-      const sleeperMesh = new THREE.InstancedMesh(
-        new THREE.BoxGeometry(0.74, 0.08, 0.16),
-        new THREE.MeshStandardMaterial({ color: 0x8b6b42, roughness: 0.95, metalness: 0.01 }),
-        sleepers.length,
-      );
-      sleeperMesh.castShadow = true;
-      sleeperMesh.receiveShadow = true;
-      const sleeperMatrix = new THREE.Matrix4();
-      const sleeperQuaternion = new THREE.Quaternion();
-      for (let i = 0; i < sleepers.length; i += 1) {
-        const s = sleepers[i];
-        sleeperQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), s.angle);
-        sleeperMatrix.compose(
-          new THREE.Vector3(s.x, s.y, s.z),
-          sleeperQuaternion,
-          new THREE.Vector3(1, 1, 1),
-        );
-        sleeperMesh.setMatrixAt(i, sleeperMatrix);
-      }
-      sleeperMesh.instanceMatrix.needsUpdate = true;
-      this.scene.add(sleeperMesh);
-
-      const railMaterial = new THREE.MeshStandardMaterial({
-        color: 0xc4c7cc,
-        roughness: 0.34,
-        metalness: 0.78,
-      });
-      const leftRailCurve = new OffsetTrackCurve(this.curve, this.railGauge * 0.5, this.railHeight);
-      const rightRailCurve = new OffsetTrackCurve(this.curve, -this.railGauge * 0.5, this.railHeight);
-      const leftRail = new THREE.Mesh(new THREE.TubeGeometry(leftRailCurve, 360, 0.045, 8, true), railMaterial);
-      const rightRail = new THREE.Mesh(new THREE.TubeGeometry(rightRailCurve, 360, 0.045, 8, true), railMaterial);
-      leftRail.castShadow = false;
-      leftRail.receiveShadow = true;
-      rightRail.castShadow = false;
-      rightRail.receiveShadow = true;
-      this.scene.add(leftRail);
-      this.scene.add(rightRail);
+      // Rails are placed manually in Rail Edit debug mode.
     }
 
     getPointAt(t, target = new THREE.Vector3()) {
@@ -636,6 +936,17 @@
 
     getTangentAt(t, target = new THREE.Vector3()) {
       return this.curve.getTangent(t, target);
+    }
+
+    setRailLayout(layout) {
+      const customPath = buildRailPath(layout, this.pathY);
+      if (customPath) {
+        this.curve = customPath;
+        this.usingRailLayout = true;
+      } else {
+        this.curve = this.defaultCurve;
+        this.usingRailLayout = false;
+      }
     }
   }
 
@@ -708,7 +1019,7 @@
       slot.state = 'built';
 
       const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(0.58, 0.58, 0.58),
+        new THREE.BoxGeometry(this.cellSize, this.cellSize, this.cellSize),
         this.createMaterial(slot.type, 0xffffff),
       );
       mesh.position.copy(slot.position);
@@ -726,6 +1037,139 @@
 
     getTotalCount() {
       return this.slots.length;
+    }
+  }
+
+  class RailDebugEditor {
+    constructor(options) {
+      this.scene = options.scene;
+      this.camera = options.camera;
+      this.canvas = options.canvas;
+      this.baseY = options.baseY;
+      this.onChange = options.onChange || null;
+
+      this.enabled = false;
+      this.selectedType = 'straight';
+      this.selectedYaw = 0;
+      this.cells = new Map();
+      this.group = new THREE.Group();
+      this.scene.add(this.group);
+
+      this.raycaster = new THREE.Raycaster();
+      this.mouseNdc = new THREE.Vector2();
+      this.railGeometry = new THREE.PlaneGeometry(1, 1);
+      this.railGeometry.rotateX(-Math.PI * 0.5);
+      this.materials = {
+        straight: createRailTileMaterial(RAIL_TEXTURES.straight),
+        corner: createRailTileMaterial(RAIL_TEXTURES.corner),
+      };
+    }
+
+    setEnabled(value) {
+      this.enabled = value;
+    }
+
+    isEnabled() {
+      return this.enabled;
+    }
+
+    setType(type) {
+      this.selectedType = type === 'corner' ? 'corner' : 'straight';
+    }
+
+    setRotationDeg(deg) {
+      this.selectedYaw = ((Number(deg) || 0) * Math.PI) / 180;
+    }
+
+    getCellKey(x, z) {
+      return `${x}:${z}`;
+    }
+
+    eventToCell(event) {
+      const rect = this.canvas.getBoundingClientRect();
+      this.mouseNdc.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      this.mouseNdc.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      this.raycaster.setFromCamera(this.mouseNdc, this.camera);
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -this.baseY);
+      const point = new THREE.Vector3();
+      const hit = this.raycaster.ray.intersectPlane(plane, point);
+      if (!hit) {
+        return null;
+      }
+      return {
+        x: Math.round(point.x),
+        z: Math.round(point.z),
+      };
+    }
+
+    placeAtEvent(event) {
+      if (!this.enabled) return;
+      const cell = this.eventToCell(event);
+      if (!cell) return;
+      this.placeRail(this.selectedType, cell.x, cell.z, this.selectedYaw);
+    }
+
+    removeAtEvent(event) {
+      if (!this.enabled) return;
+      const cell = this.eventToCell(event);
+      if (!cell) return;
+      const key = this.getCellKey(cell.x, cell.z);
+      const existing = this.cells.get(key);
+      if (!existing) return;
+      this.group.remove(existing.mesh);
+      this.cells.delete(key);
+      if (this.onChange) this.onChange();
+    }
+
+    clear() {
+      for (const item of this.cells.values()) {
+        this.group.remove(item.mesh);
+      }
+      this.cells.clear();
+      if (this.onChange) this.onChange();
+    }
+
+    placeRail(type, x, z, yaw) {
+      const key = this.getCellKey(x, z);
+      const existing = this.cells.get(key);
+      if (existing) {
+        this.group.remove(existing.mesh);
+      }
+
+      const safeType = type === 'corner' ? 'corner' : 'straight';
+      const safeYaw = Number.isFinite(yaw) ? yaw : 0;
+      const mesh = new THREE.Mesh(
+        this.railGeometry,
+        safeType === 'corner' ? this.materials.corner : this.materials.straight,
+      );
+      mesh.position.set(x, this.baseY + 0.01, z);
+      mesh.rotation.y = safeYaw;
+      mesh.receiveShadow = true;
+      mesh.castShadow = false;
+      this.group.add(mesh);
+      this.cells.set(key, { mesh, type: safeType, x, z, yaw: safeYaw });
+      if (this.onChange) this.onChange();
+    }
+
+    exportData() {
+      return Array.from(this.cells.values())
+        .map(({ type, x, z, yaw }) => ({ type, x, z, yaw }))
+        .sort((a, b) => (a.z - b.z) || (a.x - b.x));
+    }
+
+    loadData(data) {
+      this.clear();
+      const list = Array.isArray(data) ? data : [];
+      for (const item of list) {
+        const x = Number(item.x);
+        const z = Number(item.z);
+        const yaw = Number(item.yaw);
+        if (!Number.isFinite(x) || !Number.isFinite(z)) {
+          continue;
+        }
+        this.placeRail(item.type, Math.round(x), Math.round(z), Number.isFinite(yaw) ? yaw : 0);
+      }
+      if (this.onChange) this.onChange();
     }
   }
 
@@ -1103,7 +1547,7 @@
       this.raycaster = new THREE.Raycaster();
       this.mouseNdc = new THREE.Vector2();
       this.hoverCell = null;
-      this.boxSize = this.cellSize * 0.92;
+      this.boxSize = this.cellSize;
 
       this.group = new THREE.Group();
       this.scene.add(this.group);
@@ -1358,8 +1802,8 @@
 
   const trackController = new TrackController(scene);
   const buildManager = new BuildManager(scene, {
-    cellSize: 0.64,
-    baseY: 0.34,
+    cellSize: 1,
+    baseY: 0.5,
     createMaterial: createBlockMaterial,
   });
   buildManager.loadFromLevel(DEFAULT_EDITOR_LEVEL);
@@ -1367,8 +1811,8 @@
     scene,
     camera,
     canvas,
-    cellSize: 0.64,
-    baseY: 0.34,
+    cellSize: 1,
+    baseY: 0.5,
     minX: -6,
     maxX: 6,
     minZ: -4,
@@ -1376,6 +1820,45 @@
     createMaterial: createBlockMaterial,
   });
   editor.loadJSON(DEFAULT_EDITOR_LEVEL);
+  const RAILS_STORAGE_KEY = 'prototype:rails_layout_v1';
+  const uiPanel = document.getElementById('ui-panel');
+  const debugEditor = document.getElementById('debug-editor');
+  let uiHidden = false;
+
+  function applyUiVisibility() {
+    const display = uiHidden ? 'none' : '';
+    uiPanel.style.display = display;
+    debugEditor.style.display = display;
+  }
+
+  function saveRailsLayout() {
+    try {
+      localStorage.setItem(RAILS_STORAGE_KEY, JSON.stringify(railEditor.exportData()));
+    } catch (error) {
+      console.warn('Failed to save rails to localStorage', error);
+    }
+  }
+
+  function handleRailLayoutChange() {
+    saveRailsLayout();
+    trackController.setRailLayout(railEditor.exportData());
+  }
+
+  const railEditor = new RailDebugEditor({
+    scene,
+    camera,
+    canvas,
+    baseY: trackController.pathY,
+    onChange: handleRailLayoutChange,
+  });
+  try {
+    const savedRails = JSON.parse(localStorage.getItem(RAILS_STORAGE_KEY) || '[]');
+    railEditor.loadData(savedRails);
+    trackController.setRailLayout(railEditor.exportData());
+  } catch (error) {
+    console.warn('Failed to restore rails from localStorage', error);
+    trackController.setRailLayout([]);
+  }
 
   let activeBlockId = null;
 
@@ -1483,6 +1966,10 @@
     const blockSelect = document.getElementById('editor-block');
     const layerInput = document.getElementById('editor-layer');
     const clearBtn = document.getElementById('editor-clear');
+    const railEnabledInput = document.getElementById('rail-enabled');
+    const railTypeSelect = document.getElementById('rail-type');
+    const railRotSelect = document.getElementById('rail-rot');
+    const railClearBtn = document.getElementById('rail-clear');
     const exportBtn = document.getElementById('editor-export');
     const applyBtn = document.getElementById('editor-apply');
 
@@ -1502,9 +1989,25 @@
     clearBtn.addEventListener('click', () => {
       editor.clear();
     });
+    railEnabledInput.addEventListener('change', () => {
+      railEditor.setEnabled(railEnabledInput.checked);
+    });
+    railTypeSelect.addEventListener('change', () => {
+      railEditor.setType(railTypeSelect.value);
+    });
+    railRotSelect.addEventListener('change', () => {
+      railEditor.setRotationDeg(Number(railRotSelect.value));
+    });
+    railClearBtn.addEventListener('click', () => {
+      railEditor.clear();
+    });
 
     exportBtn.addEventListener('click', async () => {
-      const text = editor.exportJSON();
+      const payload = {
+        blocks: JSON.parse(editor.exportJSON()).blocks || [],
+        rails: railEditor.exportData(),
+      };
+      const text = JSON.stringify(payload, null, 2);
       try {
         await navigator.clipboard.writeText(text);
       } catch (error) {
@@ -1517,12 +2020,17 @@
       if (activeBlockId !== null) {
         return;
       }
-      const data = JSON.parse(editor.exportJSON());
+      const data = {
+        blocks: JSON.parse(editor.exportJSON()).blocks || [],
+        rails: railEditor.exportData(),
+      };
       buildManager.loadFromLevel(data);
     });
 
     editor.setType(blockSelect.value);
     editor.setLayer(Number(layerInput.value));
+    railEditor.setType(railTypeSelect.value);
+    railEditor.setRotationDeg(Number(railRotSelect.value));
   }
 
   function step(dt) {
@@ -1578,15 +2086,43 @@
   });
 
   canvas.addEventListener('pointerdown', (event) => {
+    if (railEditor.isEnabled()) {
+      if (event.button === 0) {
+        railEditor.placeAtEvent(event);
+      } else if (event.button === 2) {
+        railEditor.removeAtEvent(event);
+      }
+      return;
+    }
     if (event.button !== 0) {
       return;
     }
     editor.updateHoverFromPointer(event);
     editor.placeAtHover();
   });
+  canvas.addEventListener('contextmenu', (event) => {
+    if (railEditor.isEnabled()) {
+      event.preventDefault();
+    }
+  });
+
+  window.addEventListener('keydown', (event) => {
+    if (event.code !== 'Space' || event.repeat) {
+      return;
+    }
+    event.preventDefault();
+    uiHidden = !uiHidden;
+    applyUiVisibility();
+  });
+  window.addEventListener('keyup', (event) => {
+    if (event.code === 'Space') {
+      event.preventDefault();
+    }
+  });
 
   refreshUiLockState();
   syncUiAnchors();
+  applyUiVisibility();
   bindDebugEditorUI();
   animate();
 })();

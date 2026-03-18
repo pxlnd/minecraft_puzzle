@@ -33,8 +33,30 @@
         <span>Layer Y</span>
         <input id="editor-layer" type="number" min="0" max="8" value="0" />
       </label>
+      <hr />
+      <label class="debug-row">
+        <span>Rail Edit</span>
+        <input id="rail-enabled" type="checkbox" />
+      </label>
+      <label class="debug-row">
+        <span>Rail Type</span>
+        <select id="rail-type">
+          <option value="straight">Straight</option>
+          <option value="corner">Corner</option>
+        </select>
+      </label>
+      <label class="debug-row">
+        <span>Rail Rot</span>
+        <select id="rail-rot">
+          <option value="0">0°</option>
+          <option value="90">90°</option>
+          <option value="180">180°</option>
+          <option value="270">270°</option>
+        </select>
+      </label>
       <div class="debug-actions">
         <button id="editor-clear" type="button">Clear</button>
+        <button id="rail-clear" type="button">Clear Rails</button>
         <button id="editor-export" type="button">Export JSON</button>
         <button id="editor-apply" type="button">Use As Target</button>
       </div>
@@ -42,6 +64,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
     <script src="./js/prototype/texture-data.js"></script>
-    <script src="./js/prototype/app.js?v=20260318-07"></script>
+    <script src="./js/prototype/app.js?v=20260318-26"></script>
   </body>
 </html>
