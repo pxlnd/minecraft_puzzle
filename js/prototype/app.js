@@ -348,14 +348,15 @@
   const RAIL_TEXTURES = createMinecraftRailTextures();
   const MINECART_TEXTURE = createMinecartTexture();
   const DEFAULT_EDITOR_LEVEL = {
-    blocks: [
-      { type: 'stone', x: 2, y: 0, z: -2 },
-      { type: 'stone', x: 4, y: 0, z: 1 },
-      { type: 'stone', x: -5, y: 0, z: 2 },
-      { type: 'stone', x: -4, y: 0, z: 2 },
-      { type: 'stone', x: -3, y: 0, z: 2 },
-      { type: 'stone', x: -2, y: 0, z: 2 },
-    ],
+    blocks: (() => {
+      const blocks = [];
+      for (let z = -3; z <= 3; z += 1) {
+        for (let x = -5; x <= 5; x += 1) {
+          blocks.push({ type: 'stone', x, y: 0, z });
+        }
+      }
+      return blocks;
+    })(),
   };
   const DEFAULT_RAILS_LAYOUT = (() => {
     const rails = [];
@@ -1164,6 +1165,7 @@
       this.createMaterial = options.createMaterial;
       this.slots = [];
       this.builtMeshes = [];
+      this.shadowPlane = null;
     }
 
     loadFromLevel(data) {
@@ -1173,6 +1175,12 @@
         mesh.material.dispose();
       }
       this.builtMeshes = [];
+      if (this.shadowPlane) {
+        this.scene.remove(this.shadowPlane);
+        this.shadowPlane.geometry.dispose();
+        this.shadowPlane.material.dispose();
+        this.shadowPlane = null;
+      }
       this.slots = [];
 
       const list = data && Array.isArray(data.blocks) ? data.blocks : [];
@@ -1199,6 +1207,36 @@
           ),
           state: 'free',
         });
+      }
+
+      if (this.slots.length > 0) {
+        let minX = Infinity;
+        let maxX = -Infinity;
+        let minZ = Infinity;
+        let maxZ = -Infinity;
+        for (const slot of this.slots) {
+          minX = Math.min(minX, slot.position.x);
+          maxX = Math.max(maxX, slot.position.x);
+          minZ = Math.min(minZ, slot.position.z);
+          maxZ = Math.max(maxZ, slot.position.z);
+        }
+
+        const pad = this.cellSize * 1.1;
+        const width = Math.max(this.cellSize, (maxX - minX) + this.cellSize + pad);
+        const depth = Math.max(this.cellSize, (maxZ - minZ) + this.cellSize + pad);
+        const catcher = new THREE.Mesh(
+          new THREE.PlaneGeometry(width, depth),
+          new THREE.ShadowMaterial({ opacity: 0.36 }),
+        );
+        catcher.rotation.x = -Math.PI * 0.5;
+        catcher.position.set(
+          (minX + maxX) * 0.5,
+          this.baseY - this.cellSize * 0.5 + 0.01,
+          (minZ + maxZ) * 0.5,
+        );
+        catcher.receiveShadow = true;
+        this.scene.add(catcher);
+        this.shadowPlane = catcher;
       }
     }
 
@@ -1568,6 +1606,7 @@
 
       this.launchDuration = 0.62;
       this.dispatchDuration = 8.1;
+      this.currentDispatchDuration = this.dispatchDuration;
       this.returnDuration = 0.68;
       this.spawnInterval = 0.46;
 
@@ -1612,7 +1651,7 @@
     }
 
     canStartCycle() {
-      return this.state === 'idle' && this.count > 0;
+      return this.state === 'idle' && this.count > 0 && !this.minecart.isMoving();
     }
 
     getCount() {
@@ -1666,6 +1705,7 @@
       this.mesh.position.y += Math.sin(Math.PI * eased) * 1.35;
 
       if (progress >= 1) {
+        this.currentDispatchDuration = this.minecart.startSingleLap();
         this.state = 'dispatching';
         this.phaseTime = 0;
         this.spawnTimer = 0;
@@ -1680,8 +1720,7 @@
 
       const cargoPos = this.minecart.getCargoAnchor(TEMP_A);
       this.mesh.position.copy(cargoPos);
-      this.mesh.rotation.x += dt * 3.2;
-      this.mesh.rotation.y += dt * 4.6;
+      this.mesh.rotation.set(0, 0, 0);
 
       this.spawnTimer += dt;
       while (this.spawnTimer >= this.spawnInterval) {
@@ -1693,7 +1732,7 @@
         }
       }
 
-      if (this.phaseTime >= this.dispatchDuration) {
+      if (this.phaseTime >= this.currentDispatchDuration || !this.minecart.isMoving()) {
         this.state = 'returning';
         this.phaseTime = 0;
         this.returnFrom.copy(this.mesh.position);
@@ -1803,8 +1842,10 @@
       this.scene = options.scene;
       this.track = options.trackController;
       this.t = Number.isFinite(options.startT) ? options.startT : 0.01;
-      this.speed = Number.isFinite(options.speed) ? options.speed : 3.08; // world units / second
+      this.speed = Number.isFinite(options.speed) ? options.speed : 4.62; // world units / second
       this.direction = 1; // counterclockwise
+      this.isRolling = false;
+      this.remainingDistance = 0;
 
       const metalMat = new THREE.MeshStandardMaterial({
         map: MINECART_TEXTURE,
@@ -1861,15 +1902,81 @@
       this.scene.add(this.group);
       this._lookTarget = new THREE.Vector3();
       this._cargoLocal = new THREE.Vector3(0, 0.44, 0);
+      this.group.scale.setScalar(1.6);
+      this.syncToTrackPosition();
+    }
+
+    isMoving() {
+      return this.isRolling;
+    }
+
+    startSingleLap() {
+      const perimeter = Math.max(0.001, this.track.curve.perimeter || 1);
+      this.remainingDistance = perimeter;
+      this.isRolling = true;
+      return perimeter / Math.max(0.001, this.speed);
+    }
+
+    setSpeed(speed) {
+      if (!Number.isFinite(speed)) {
+        return;
+      }
+      if (speed <= 0) {
+        return;
+      }
+      this.speed = speed;
+    }
+
+    getSpeed() {
+      return this.speed;
+    }
+
+    snapToNearestPoint(target, sampleCount = 720) {
+      if (!target) {
+        return;
+      }
+
+      const samples = Math.max(32, sampleCount | 0);
+      let bestT = this.t;
+      let bestDistSq = Infinity;
+      const probe = new THREE.Vector3();
+      for (let i = 0; i < samples; i += 1) {
+        const t = i / samples;
+        this.track.getPointAt(t, probe);
+        const dx = probe.x - target.x;
+        const dy = probe.y - target.y;
+        const dz = probe.z - target.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < bestDistSq) {
+          bestDistSq = d2;
+          bestT = t;
+        }
+      }
+      this.t = bestT;
+      this.syncToTrackPosition();
     }
 
     update(dt) {
       const perimeter = Math.max(0.001, this.track.curve.perimeter || 1);
-      this.t = (this.t + this.direction * (this.speed * dt / perimeter)) % 1;
-      if (this.t < 0) {
-        this.t += 1;
+
+      if (this.isRolling) {
+        const maxStep = this.speed * dt;
+        const step = Math.min(maxStep, this.remainingDistance);
+        this.remainingDistance = Math.max(0, this.remainingDistance - step);
+        this.t = (this.t + this.direction * (step / perimeter)) % 1;
+        if (this.t < 0) {
+          this.t += 1;
+        }
+        if (this.remainingDistance <= 1e-4) {
+          this.isRolling = false;
+          this.remainingDistance = 0;
+        }
       }
 
+      this.syncToTrackPosition();
+    }
+
+    syncToTrackPosition() {
       const p = this.track.getPointAt(this.t, TEMP_A);
       const tangent = this.track.getTangentAt(this.t, TEMP_B).multiplyScalar(this.direction);
       this.group.position.set(p.x, p.y + 0.02, p.z);
@@ -1904,6 +2011,9 @@
       this.mouseNdc = new THREE.Vector2();
       this.hoverCell = null;
       this.boxSize = this.cellSize;
+      this._normalMatrix = new THREE.Matrix3();
+      this._worldNormal = new THREE.Vector3();
+      this._dominantNormal = new THREE.Vector3();
 
       this.group = new THREE.Group();
       this.scene.add(this.group);
@@ -2000,6 +2110,26 @@
       return hit ? point : null;
     }
 
+    setRayFromPointer(event) {
+      const rect = this.canvas.getBoundingClientRect();
+      this.mouseNdc.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      this.mouseNdc.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      this.raycaster.setFromCamera(this.mouseNdc, this.camera);
+    }
+
+    getHoveredBlockHit(event) {
+      this.setRayFromPointer(event);
+      const hits = this.raycaster.intersectObjects(this.group.children, false);
+      for (const hit of hits) {
+        const data = hit.object && hit.object.userData && hit.object.userData.cell;
+        if (!data) {
+          continue;
+        }
+        return hit;
+      }
+      return null;
+    }
+
     worldToCell(world) {
       const gx = Math.round(world.x / this.cellSize);
       const gz = Math.round(world.z / this.cellSize);
@@ -2014,6 +2144,46 @@
         this.hoverCell = null;
         this.hoverMesh.visible = false;
         return;
+      }
+
+      const blockHit = this.getHoveredBlockHit(event);
+      if (blockHit) {
+        const cell = blockHit.object.userData.cell;
+        if (this.selectedType === 'erase') {
+          this.hoverCell = { x: cell.x, y: cell.y, z: cell.z };
+          this.updateHoverMesh();
+          return;
+        }
+
+        if (blockHit.face) {
+          this._normalMatrix.getNormalMatrix(blockHit.object.matrixWorld);
+          this._worldNormal.copy(blockHit.face.normal).applyMatrix3(this._normalMatrix).normalize();
+
+          const ax = Math.abs(this._worldNormal.x);
+          const ay = Math.abs(this._worldNormal.y);
+          const az = Math.abs(this._worldNormal.z);
+          this._dominantNormal.set(0, 0, 0);
+          if (ay >= ax && ay >= az) {
+            this._dominantNormal.y = Math.sign(this._worldNormal.y) || 1;
+          } else if (ax >= az) {
+            this._dominantNormal.x = Math.sign(this._worldNormal.x) || 1;
+          } else {
+            this._dominantNormal.z = Math.sign(this._worldNormal.z) || 1;
+          }
+
+          const nx = cell.x + this._dominantNormal.x;
+          const ny = cell.y + this._dominantNormal.y;
+          const nz = cell.z + this._dominantNormal.z;
+          if (
+            nx >= this.minX && nx <= this.maxX &&
+            nz >= this.minZ && nz <= this.maxZ &&
+            ny >= 0 && ny <= 8
+          ) {
+            this.hoverCell = { x: nx, y: ny, z: nz };
+            this.updateHoverMesh();
+            return;
+          }
+        }
       }
 
       const world = this.intersectGround(event);
@@ -2081,6 +2251,7 @@
         this.createMaterial(this.selectedType, 0xffffff),
       );
       mesh.position.copy(this.cellToPosition(x, targetY, z));
+      mesh.userData.cell = { x, y: targetY, z };
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.group.add(mesh);
@@ -2104,6 +2275,7 @@
         this.createMaterial(type, 0xffffff),
       );
       mesh.position.copy(this.cellToPosition(x, y, z));
+      mesh.userData.cell = { x, y, z };
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.group.add(mesh);
@@ -2179,8 +2351,8 @@
   const minecart = new MinecartController({
     scene,
     trackController,
-    startT: 0.02,
-    speed: 3.15,
+    startT: 0.126,
+    speed: 11,
   });
   const buildManager = new BuildManager(scene, {
     cellSize: 1,
@@ -2201,7 +2373,8 @@
     createMaterial: createBlockMaterial,
   });
   editor.loadJSON(DEFAULT_EDITOR_LEVEL);
-  const RAILS_STORAGE_KEY = 'prototype:rails_layout_v1';
+  const SCENE_STORAGE_KEY = 'prototype:scene_layout_v1';
+  const LEGACY_RAILS_STORAGE_KEYS = ['prototype:rails_layout_v2', 'prototype:rails_layout_v1'];
   const debugEditor = document.getElementById('debug-editor');
   let uiHidden = false;
 
@@ -2209,30 +2382,152 @@
     debugEditor.style.display = uiHidden ? 'none' : '';
   }
 
-  function saveRailsLayout() {
+  function getEditorBlocksSnapshot() {
     try {
-      localStorage.setItem(RAILS_STORAGE_KEY, JSON.stringify(railEditor.exportData()));
+      const parsed = JSON.parse(editor.exportJSON());
+      return Array.isArray(parsed.blocks) ? parsed.blocks : [];
     } catch (error) {
-      console.warn('Failed to save rails to localStorage', error);
+      console.warn('Failed to export editor blocks', error);
+      return [];
+    }
+  }
+
+  function saveSceneLayout() {
+    try {
+      const snapshot = {
+        version: 1,
+        blocks: getEditorBlocksSnapshot(),
+        rails: railEditor.exportData(),
+        minecart: {
+          speed: minecart.getSpeed(),
+        },
+      };
+      localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(snapshot));
+    } catch (error) {
+      console.warn('Failed to save scene to localStorage', error);
     }
   }
 
   function handleRailLayoutChange() {
-    saveRailsLayout();
     trackController.setRailLayout(railEditor.exportData());
+    saveSceneLayout();
   }
 
   function autoPlaceRails() {
     const autoRails = buildRailLayoutFromCurve(trackController.defaultCurve);
     railEditor.loadData(autoRails);
     trackController.setRailLayout(railEditor.exportData());
-    saveRailsLayout();
+    saveSceneLayout();
   }
 
   function loadDefaultRails() {
     railEditor.loadData(DEFAULT_RAILS_LAYOUT);
     trackController.setRailLayout(railEditor.exportData());
-    saveRailsLayout();
+    saveSceneLayout();
+  }
+
+  function normalizeBlocks(list) {
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    const normalized = [];
+    for (const block of list) {
+      if (!block || typeof block !== 'object') {
+        continue;
+      }
+      const x = Number(block.x);
+      const y = Number(block.y);
+      const z = Number(block.z);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+        continue;
+      }
+      normalized.push({
+        type: block.type || 'stone',
+        x,
+        y,
+        z,
+      });
+    }
+    return normalized;
+  }
+
+  function normalizeRails(list) {
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    const normalized = [];
+    for (const rail of list) {
+      if (!rail || typeof rail !== 'object') {
+        continue;
+      }
+      const x = Number(rail.x);
+      const z = Number(rail.z);
+      const yaw = Number(rail.yaw);
+      if (!Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(yaw)) {
+        continue;
+      }
+      if (rail.type !== 'straight' && rail.type !== 'corner') {
+        continue;
+      }
+      normalized.push({
+        type: rail.type,
+        x,
+        z,
+        yaw,
+      });
+    }
+    return normalized;
+  }
+
+  function restoreSceneLayout() {
+    try {
+      const raw = localStorage.getItem(SCENE_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const blocks = normalizeBlocks(parsed && parsed.blocks);
+        const rails = normalizeRails(parsed && parsed.rails);
+        const speed = Number(parsed && parsed.minecart && parsed.minecart.speed);
+
+        const sceneData = {
+          blocks: blocks.length > 0 ? blocks : DEFAULT_EDITOR_LEVEL.blocks,
+          rails: rails.length > 0 ? rails : DEFAULT_RAILS_LAYOUT,
+        };
+        editor.loadJSON(sceneData);
+        buildManager.loadFromLevel(sceneData);
+        railEditor.loadData(sceneData.rails);
+        trackController.setRailLayout(railEditor.exportData());
+        if (Number.isFinite(speed) && speed > 0) {
+          minecart.setSpeed(speed);
+        }
+        return true;
+      }
+    } catch (error) {
+      console.warn('Failed to restore scene from localStorage', error);
+    }
+
+    try {
+      for (const key of LEGACY_RAILS_STORAGE_KEYS) {
+        const rawRails = localStorage.getItem(key);
+        if (!rawRails) {
+          continue;
+        }
+        const legacyRails = normalizeRails(JSON.parse(rawRails));
+        if (legacyRails.length === 0) {
+          continue;
+        }
+        const sceneData = { blocks: DEFAULT_EDITOR_LEVEL.blocks, rails: legacyRails };
+        editor.loadJSON(sceneData);
+        buildManager.loadFromLevel(sceneData);
+        railEditor.loadData(sceneData.rails);
+        trackController.setRailLayout(railEditor.exportData());
+        saveSceneLayout();
+        return true;
+      }
+    } catch (error) {
+      console.warn('Failed to restore legacy rails from localStorage', error);
+    }
+
+    return false;
   }
 
   const railEditor = new RailDebugEditor({
@@ -2242,18 +2537,12 @@
     baseY: trackController.pathY,
     onChange: handleRailLayoutChange,
   });
-  try {
-    const savedRails = JSON.parse(localStorage.getItem(RAILS_STORAGE_KEY) || '[]');
-    if (Array.isArray(savedRails) && savedRails.length > 0) {
-      railEditor.loadData(savedRails);
-      trackController.setRailLayout(railEditor.exportData());
-    } else {
-      loadDefaultRails();
-    }
-  } catch (error) {
-    console.warn('Failed to restore rails from localStorage', error);
+  if (!restoreSceneLayout()) {
+    editor.loadJSON(DEFAULT_EDITOR_LEVEL);
+    buildManager.loadFromLevel(DEFAULT_EDITOR_LEVEL);
     loadDefaultRails();
   }
+  minecart.snapToNearestPoint(new THREE.Vector3(0, trackController.pathY, 7.7));
 
   let activeBlockId = null;
 
@@ -2333,6 +2622,7 @@
     const railEnabledInput = document.getElementById('rail-enabled');
     const railTypeSelect = document.getElementById('rail-type');
     const railRotSelect = document.getElementById('rail-rot');
+    const minecartSpeedInput = document.getElementById('minecart-speed');
     const railClearBtn = document.getElementById('rail-clear');
     const railAutoBtn = document.getElementById('rail-auto');
     const exportBtn = document.getElementById('editor-export');
@@ -2353,6 +2643,7 @@
 
     clearBtn.addEventListener('click', () => {
       editor.clear();
+      saveSceneLayout();
     });
     railEnabledInput.addEventListener('change', () => {
       railEditor.setEnabled(railEnabledInput.checked);
@@ -2362,6 +2653,12 @@
     });
     railRotSelect.addEventListener('change', () => {
       railEditor.setRotationDeg(Number(railRotSelect.value));
+    });
+    minecartSpeedInput.addEventListener('change', () => {
+      const speed = Number(minecartSpeedInput.value);
+      minecart.setSpeed(speed);
+      minecartSpeedInput.value = String(minecart.getSpeed());
+      saveSceneLayout();
     });
     railClearBtn.addEventListener('click', () => {
       railEditor.clear();
@@ -2393,12 +2690,14 @@
         rails: railEditor.exportData(),
       };
       buildManager.loadFromLevel(data);
+      saveSceneLayout();
     });
 
     editor.setType(blockSelect.value);
     editor.setLayer(Number(layerInput.value));
     railEditor.setType(railTypeSelect.value);
     railEditor.setRotationDeg(Number(railRotSelect.value));
+    minecartSpeedInput.value = String(minecart.getSpeed());
   }
 
   function tryInventoryClick(event) {
@@ -2458,6 +2757,10 @@
 
   canvas.addEventListener('pointermove', (event) => {
     editor.updateHoverFromPointer(event);
+    if (editor.isEnabled() && event.buttons === 1 && editor.selectedType === 'erase') {
+      editor.placeAtHover();
+      saveSceneLayout();
+    }
   });
 
   canvas.addEventListener('pointerdown', (event) => {
@@ -2479,6 +2782,7 @@
 
     editor.updateHoverFromPointer(event);
     editor.placeAtHover();
+    saveSceneLayout();
   });
   canvas.addEventListener('contextmenu', (event) => {
     if (railEditor.isEnabled()) {
