@@ -1,9 +1,3 @@
-:root {
-  --ui-brown: rgba(95, 52, 28, 0.72);
-  --ui-brown-border: rgba(161, 95, 52, 0.9);
-  --ui-slot-border: rgba(163, 95, 54, 0.95);
-}
-
 * {
   box-sizing: border-box;
 }
@@ -22,88 +16,6 @@ body {
   width: 100%;
   height: 100%;
   display: block;
-}
-
-.ui-panel {
-  position: fixed;
-  left: 50%;
-  bottom: 16px;
-  transform: translateX(-50%);
-  width: min(620px, 92vw);
-  height: 130px;
-  pointer-events: none;
-}
-
-.ui-track {
-  position: absolute;
-  inset: 0;
-  border-radius: 18px;
-  border: 2px solid var(--ui-brown-border);
-  background: linear-gradient(180deg, rgba(136, 78, 42, 0.55) 0%, rgba(88, 49, 29, 0.7) 100%);
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.34);
-  pointer-events: none;
-}
-
-.slots {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(64px, 1fr));
-  gap: 12px;
-  padding: 14px;
-  pointer-events: auto;
-}
-
-.ui-slot {
-  position: relative;
-  border: 4px solid var(--ui-slot-border);
-  background: rgba(70, 36, 20, 0.15);
-  border-radius: 18px;
-  min-height: 92px;
-  outline: none;
-  cursor: pointer;
-  transition: border-color 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
-}
-
-.ui-slot:hover:not(:disabled) {
-  border-color: #f0c39f;
-  transform: translateY(-1px);
-}
-
-.ui-slot:disabled,
-.ui-slot.disabled {
-  cursor: not-allowed;
-  opacity: 0.38;
-}
-
-.ui-slot.locked {
-  opacity: 0.45;
-}
-
-.ui-slot.empty {
-  border-style: dashed;
-  cursor: default;
-}
-
-.slot-label,
-.slot-count {
-  position: absolute;
-  left: 8px;
-  color: #f7e6d8;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  pointer-events: none;
-}
-
-.slot-label {
-  top: 6px;
-  font-size: 12px;
-}
-
-.slot-count {
-  bottom: 6px;
-  font-size: 14px;
 }
 
 .debug-editor {
