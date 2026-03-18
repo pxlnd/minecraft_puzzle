@@ -40,6 +40,8 @@
       height: 410px;
       border-radius: 22px;
       overflow: hidden;
+      perspective: 980px;
+      perspective-origin: 50% 42%;
     }
 
     .bottom-cells {
@@ -81,15 +83,27 @@
     }
 
     .cube-wrap {
+      --cube-size: 46px;
+      --cube-half: 23px;
       position: absolute;
       left: 50%;
       top: 50%;
-      width: 46px;
-      height: 46px;
+      width: var(--cube-size);
+      height: var(--cube-size);
       transform: translate(-50%, -50%);
       perspective: 360px;
       z-index: 2;
       filter: drop-shadow(0 5px 3px rgba(0, 0, 0, 0.45));
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    .cube-wrap.is-moving {
+      left: 0;
+      top: 0;
+      transform: none;
+      z-index: 10;
+      cursor: default;
     }
 
     .cube {
@@ -104,6 +118,10 @@
     .cube.s2 { animation-delay: .12s; }
     .cube.s3 { animation-delay: .24s; }
     .cube.s4 { animation-delay: .36s; }
+    .cube.no-spin {
+      animation: none;
+      transform: rotateX(-24deg) rotateY(0deg);
+    }
 
     .face {
       position: absolute;
@@ -132,12 +150,12 @@
         repeating-linear-gradient(0deg, rgba(255,255,255,.12) 0 2px, rgba(255,255,255,0) 2px 6px);
     }
 
-    .front  { transform: translateZ(23px); }
-    .back   { transform: rotateY(180deg) translateZ(23px); }
-    .right  { transform: rotateY(90deg) translateZ(23px); filter: brightness(.82); }
-    .left   { transform: rotateY(-90deg) translateZ(23px); filter: brightness(.72); }
-    .top    { transform: rotateX(90deg) translateZ(23px); filter: brightness(1.08); }
-    .bottom { transform: rotateX(-90deg) translateZ(23px); filter: brightness(.62); }
+    .front  { transform: translateZ(var(--cube-half)); }
+    .back   { transform: rotateY(180deg) translateZ(var(--cube-half)); }
+    .right  { transform: rotateY(90deg) translateZ(var(--cube-half)); filter: brightness(.82); }
+    .left   { transform: rotateY(-90deg) translateZ(var(--cube-half)); filter: brightness(.72); }
+    .top    { transform: rotateX(90deg) translateZ(var(--cube-half)); filter: brightness(1.08); }
+    .bottom { transform: rotateX(-90deg) translateZ(var(--cube-half)); filter: brightness(.62); }
 
     .badge {
       position: absolute;
@@ -158,6 +176,152 @@
       text-shadow: 0 1px 1px rgba(0, 0, 0, .6);
     }
 
+    .debug-panel {
+      position: absolute;
+      right: 10px;
+      top: 10px;
+      width: 190px;
+      z-index: 40;
+      background: rgba(12, 14, 18, 0.86);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 10px;
+      padding: 8px;
+      color: #ecf1f8;
+      font-size: 12px;
+      line-height: 1.35;
+      backdrop-filter: blur(4px);
+    }
+
+    .debug-panel .row {
+      display: flex;
+      gap: 6px;
+      margin-top: 6px;
+      align-items: center;
+    }
+
+    .debug-panel label {
+      font-size: 11px;
+      color: #c4ccda;
+      min-width: 46px;
+    }
+
+    .debug-panel select,
+    .debug-panel input,
+    .debug-panel button,
+    .debug-panel textarea {
+      width: 100%;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.08);
+      color: #f4f8ff;
+      font: inherit;
+      padding: 4px 6px;
+      outline: none;
+    }
+
+    .debug-panel button {
+      cursor: pointer;
+      font-weight: 700;
+      background: rgba(67, 186, 255, 0.2);
+      border-color: rgba(67, 186, 255, 0.45);
+    }
+
+    .debug-panel textarea {
+      min-height: 86px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+    }
+
+    .debug-note {
+      margin-top: 6px;
+      color: #9ca8bc;
+      font-size: 10px;
+    }
+
+    .grid-line {
+      position: absolute;
+      background: rgba(178, 184, 194, 0.42);
+      pointer-events: none;
+    }
+
+    .grid-fill {
+      position: absolute;
+      background: rgba(255, 255, 255, 0.14);
+      outline: 1px solid rgba(255, 255, 255, 0.24);
+      pointer-events: none;
+    }
+
+    .structure-world {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .structure-world.ghost {
+      opacity: 0.92;
+      filter: saturate(0.94);
+    }
+
+    .cube-wrap.structure-cube {
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      perspective: 980px;
+      perspective-origin: 38% 28%;
+      cursor: default;
+      touch-action: auto;
+      pointer-events: none;
+    }
+
+    .cube-wrap.structure-cube::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: calc(100% - 2px);
+      width: 90%;
+      height: 28%;
+      transform: translate(-50%, -50%) scale(var(--shadow-scale, 1));
+      transform-origin: center;
+      border-radius: 50%;
+      background: radial-gradient(
+        ellipse at center,
+        rgba(0, 0, 0, var(--shadow-alpha, 0.3)) 0%,
+        rgba(0, 0, 0, 0) 72%
+      );
+      pointer-events: none;
+      z-index: -1;
+    }
+
+    .cube-wrap.structure-cube .cube {
+      transform: rotateX(-34deg) rotateY(36deg);
+      transform-style: preserve-3d;
+    }
+
+    .cube-wrap.structure-cube .cube.no-spin {
+      animation: none;
+      transform: rotateX(-34deg) rotateY(36deg);
+    }
+
+    .cube-wrap.structure-cube .face {
+      border: 1px solid rgba(0, 0, 0, 0.34);
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+        inset 0 -8px 10px rgba(0, 0, 0, 0.14);
+    }
+
+    .cube-wrap.structure-cube .top {
+      filter: brightness(1.26) saturate(1.04);
+    }
+
+    .cube-wrap.structure-cube .right {
+      filter: brightness(0.8) saturate(0.98);
+    }
+
+    .cube-wrap.structure-cube .left {
+      filter: brightness(0.62) saturate(0.95);
+    }
+
     @keyframes spin {
       from { transform: rotateX(-28deg) rotateY(0deg); }
       to { transform: rotateX(-28deg) rotateY(360deg); }
@@ -171,9 +335,9 @@
     </section>
     <section class="bottom-cells" aria-label="Empty cells">
       <div class="cell">
-        <div class="cube-wrap">
+        <div class="cube-wrap" data-block-type="stone">
           <div class="cube stone">
-            <div class="face front"><span class="badge">1</span></div>
+            <div class="face front"><span class="badge" data-count-for="stone">0</span></div>
             <div class="face back"></div>
             <div class="face right"></div>
             <div class="face left"></div>
@@ -183,9 +347,9 @@
         </div>
       </div>
       <div class="cell">
-        <div class="cube-wrap">
+        <div class="cube-wrap" data-block-type="wood">
           <div class="cube wood s2">
-            <div class="face front"><span class="badge">2</span></div>
+            <div class="face front"><span class="badge" data-count-for="wood">0</span></div>
             <div class="face back"></div>
             <div class="face right"></div>
             <div class="face left"></div>
@@ -195,9 +359,9 @@
         </div>
       </div>
       <div class="cell">
-        <div class="cube-wrap">
+        <div class="cube-wrap" data-block-type="glass">
           <div class="cube glass s3">
-            <div class="face front"><span class="badge">3</span></div>
+            <div class="face front"><span class="badge" data-count-for="glass">0</span></div>
             <div class="face back"></div>
             <div class="face right"></div>
             <div class="face left"></div>
@@ -209,7 +373,893 @@
       <div class="cell">
       </div>
     </section>
+    <section class="debug-panel" id="debugPanel">
+      <strong>Layout Debug</strong>
+      <div class="row">
+        <label for="debugType">Type</label>
+        <select id="debugType">
+          <option value="stone">stone</option>
+          <option value="wood">wood</option>
+          <option value="glass">glass</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="debugY">Layer Y</label>
+        <input id="debugY" type="number" min="0" max="8" step="1" value="0" />
+      </div>
+      <div class="row">
+        <label for="debugGridStep">Grid px</label>
+        <input id="debugGridStep" type="number" min="12" max="80" step="1" value="24" />
+      </div>
+      <div class="row">
+        <button id="debugApplyBtn" type="button">Apply to Game</button>
+      </div>
+      <div class="row">
+        <button id="debugClearBtn" type="button">Clear</button>
+      </div>
+      <div class="row">
+        <button id="debugExportBtn" type="button">Export</button>
+      </div>
+      <div class="row">
+        <button id="debugImportBtn" type="button">Import</button>
+      </div>
+      <div class="row">
+        <textarea id="debugOutput" placeholder="Exported JSON will appear here"></textarea>
+      </div>
+      <div class="debug-note">LMB: place block (auto-stack up). RMB: remove top block.</div>
+    </section>
   </main>
 
+<script>
+  const DEBUG_SHOW_FINAL_STRUCTURE = true;
+  const DEBUG_LAYOUT_EDITOR = true;
+
+  const BLOCK_DEFS = {
+    stone: { initialCount: 18 },
+    wood: { initialCount: 12 },
+    glass: { initialCount: 8 },
+  };
+
+  const BASE_BUILD_LAYOUT = [
+    // foundation (stone)
+    { type: 'stone', x: 0, z: 0, y: 0 },
+    { type: 'stone', x: 1, z: 0, y: 0 },
+    { type: 'stone', x: 2, z: 0, y: 0 },
+    { type: 'stone', x: 0, z: 1, y: 0 },
+    { type: 'stone', x: 2, z: 1, y: 0 },
+    { type: 'stone', x: 0, z: 2, y: 0 },
+    { type: 'stone', x: 1, z: 2, y: 0 },
+    { type: 'stone', x: 2, z: 2, y: 0 },
+
+    // wood pillars + top center
+    { type: 'wood', x: 0, z: 0, y: 1 },
+    { type: 'wood', x: 2, z: 0, y: 1 },
+    { type: 'wood', x: 1, z: 0, y: 1 },
+    { type: 'wood', x: 1, z: 2, y: 1 },
+    { type: 'wood', x: 1, z: 2, y: 2 },
+
+    // glass walls
+    { type: 'glass', x: 1, z: 1, y: 1 },
+    { type: 'glass', x: 0, z: 1, y: 1 },
+    { type: 'glass', x: 2, z: 1, y: 1 },
+    { type: 'glass', x: 0, z: 2, y: 1 },
+    { type: 'glass', x: 2, z: 2, y: 1 },
+    { type: 'glass', x: 1, z: 2, y: 1 },
+  ];
+  const BUILD_LAYOUT = BASE_BUILD_LAYOUT.map((slot) => ({ ...slot }));
+
+  const screenEl = document.querySelector('.screen');
+  const wallEl = document.querySelector('.board-inner');
+  const blockEls = Array.from(document.querySelectorAll('.bottom-cells .cube-wrap'));
+  const debugPanelEl = document.getElementById('debugPanel');
+  const debugTypeEl = document.getElementById('debugType');
+  const debugYEl = document.getElementById('debugY');
+  const debugGridStepEl = document.getElementById('debugGridStep');
+  const debugApplyBtn = document.getElementById('debugApplyBtn');
+  const debugClearBtn = document.getElementById('debugClearBtn');
+  const debugExportBtn = document.getElementById('debugExportBtn');
+  const debugImportBtn = document.getElementById('debugImportBtn');
+  const debugOutputEl = document.getElementById('debugOutput');
+  const countEls = new Map(
+    Array.from(document.querySelectorAll('[data-count-for]'))
+      .map((el) => [el.dataset.countFor, el]),
+  );
+
+  const pathConfig = {
+    // Координаты центра блока в локальной системе .board-inner
+    loopBoardPoints: [
+      { x: 382.6, y: 356 },
+      { x: 382.8, y: -26.5 },
+      { x: -22.1, y: -28.6 },
+      { x: -22.9, y: 352 },
+    ],
+  };
+
+  let activeMotion = false;
+  const pendingSpawnAnimations = new Set();
+
+  class InventoryManager {
+    constructor(defs, countNodes) {
+      this.counts = Object.fromEntries(
+        Object.entries(defs).map(([type, def]) => [type, Math.max(0, Number(def.initialCount) || 0)]),
+      );
+      this.countNodes = countNodes;
+      this.render();
+    }
+
+    has(type) {
+      return (this.counts[type] || 0) > 0;
+    }
+
+    get(type) {
+      return this.counts[type] || 0;
+    }
+
+    consume(type) {
+      if (!this.has(type)) {
+        return false;
+      }
+      this.counts[type] -= 1;
+      this.render();
+      return true;
+    }
+
+    setFromCounts(counts) {
+      const next = {};
+      for (const key of Object.keys(this.counts)) {
+        next[key] = Math.max(0, Number(counts?.[key]) || 0);
+      }
+      this.counts = next;
+      this.render();
+    }
+
+    render() {
+      for (const [type, el] of this.countNodes.entries()) {
+        el.textContent = String(this.get(type));
+      }
+    }
+  }
+
+  class BuildLayoutManager {
+    constructor(slots) {
+      this.queuesByType = new Map();
+      for (const slot of slots) {
+        if (!this.queuesByType.has(slot.type)) {
+          this.queuesByType.set(slot.type, []);
+        }
+        this.queuesByType.get(slot.type).push({
+          ...slot,
+          placed: false,
+        });
+      }
+    }
+
+    getRemaining(type) {
+      return (this.queuesByType.get(type) || []).filter((slot) => !slot.placed).length;
+    }
+
+    claimNext(type) {
+      const slots = this.queuesByType.get(type) || [];
+      for (const slot of slots) {
+        if (!slot.placed) {
+          slot.placed = true;
+          return slot;
+        }
+      }
+      return null;
+    }
+  }
+
+  class StructureView {
+    constructor(host) {
+      this.host = host;
+      this.gridStep = 24;
+      this.layerHeight = this.gridStep * 1.02;
+      this.tileHeight = this.gridStep * 0.52;
+      this.origin = { x: 0, y: 0 };
+      this.worldCols = 14;
+      this.worldRows = 14;
+      this.worldOffsetX = 0;
+      this.worldOffsetZ = 0;
+      this.layer = document.createElement('div');
+      this.layer.className = 'structure-world';
+      this.host.appendChild(this.layer);
+
+      this.previewLayer = document.createElement('div');
+      this.previewLayer.className = 'structure-world ghost';
+      this.host.appendChild(this.previewLayer);
+
+      this.gridLayer = document.createElement('div');
+      this.gridLayer.style.position = 'absolute';
+      this.gridLayer.style.inset = '0';
+      this.gridLayer.style.pointerEvents = 'none';
+      this.host.appendChild(this.gridLayer);
+      this.updateProjectionOrigin();
+      this.updateWorldTransforms();
+    }
+
+    setGridStep(step) {
+      this.gridStep = Math.max(12, Math.min(80, Number(step) || 24));
+      this.tileHeight = this.gridStep * 0.52;
+      this.layerHeight = Math.max(10, this.gridStep * 1.02);
+      this.updateProjectionOrigin();
+      this.updateWorldTransforms();
+    }
+
+    setWorldGrid(cols, rows, offsetX = 0, offsetZ = 0) {
+      this.worldCols = Math.max(1, Number(cols) || 1);
+      this.worldRows = Math.max(1, Number(rows) || 1);
+      this.worldOffsetX = Number.isFinite(offsetX) ? offsetX : 0;
+      this.worldOffsetZ = Number.isFinite(offsetZ) ? offsetZ : 0;
+      this.updateProjectionOrigin();
+      this.updateWorldTransforms();
+    }
+
+    updateProjectionOrigin() {
+      const width = this.host.clientWidth || 1;
+      const height = this.host.clientHeight || 1;
+      const gridPixelWidth = this.worldCols * this.gridStep;
+      const gridPixelHeight = this.worldRows * this.gridStep;
+      const padX = 8;
+      this.origin = {
+        x: Math.max(padX, (width - gridPixelWidth) * 0.5),
+        y: (height - gridPixelHeight) * 0.5,
+      };
+    }
+
+    updateWorldTransforms() {
+      this.layer.style.transform = '';
+      this.previewLayer.style.transform = '';
+    }
+
+    project(slot) {
+      const localX = slot.x - this.worldOffsetX;
+      const localZ = slot.z - this.worldOffsetZ;
+      const x = this.origin.x + localX * this.gridStep + this.gridStep * 0.5;
+      const y = this.origin.y + localZ * this.gridStep + this.gridStep * 0.5 - slot.y * this.layerHeight;
+      return { x, y };
+    }
+
+    createCubeNode(type, size = 26, options = {}) {
+      const wrap = document.createElement('div');
+      wrap.className = 'cube-wrap structure-cube';
+      wrap.style.setProperty('--cube-size', `${size}px`);
+      wrap.style.setProperty('--cube-half', `${size * 0.5}px`);
+      wrap.style.width = `${size}px`;
+      wrap.style.height = `${size}px`;
+      wrap.style.left = '0';
+      wrap.style.top = '0';
+      wrap.style.transform = 'none';
+      wrap.style.cursor = 'default';
+      wrap.style.pointerEvents = 'none';
+      const cubeClass = options.spin ? `cube ${type}` : `cube ${type} no-spin`;
+      wrap.innerHTML = `
+        <div class="${cubeClass}">
+          <div class="face front"></div>
+          <div class="face back"></div>
+          <div class="face right"></div>
+          <div class="face left"></div>
+          <div class="face top"></div>
+          <div class="face bottom"></div>
+        </div>
+      `;
+      return wrap;
+    }
+
+    placeCube(type, slot, options = {}) {
+      const point = this.project(slot);
+      const size = Number(options.size) || (this.gridStep + 1);
+      const node = this.createCubeNode(type, size, { spin: Boolean(options.spin) });
+      node.style.left = `${point.x}px`;
+      node.style.top = `${point.y}px`;
+      node.style.transform = 'translate(-50%, -50%)';
+      node.style.opacity = options.opacity ? String(options.opacity) : '';
+      const shadowAlpha = Math.min(0.62, 0.24 + slot.y * 0.08);
+      const shadowScale = Math.max(0.72, 1 - slot.y * 0.07);
+      node.style.setProperty('--shadow-alpha', String(shadowAlpha));
+      node.style.setProperty('--shadow-scale', String(shadowScale));
+      node.style.filter = `drop-shadow(0 4px 3px rgba(0, 0, 0, ${Math.min(0.5, 0.2 + slot.y * 0.05)}))`;
+      (options.preview ? this.previewLayer : this.layer).appendChild(node);
+    }
+
+    renderFinalPreview(slots) {
+      this.previewLayer.innerHTML = '';
+      const ordered = [...slots].sort((a, b) =>
+        ((a.x + a.z + a.y) - (b.x + b.z + b.y)) || (a.z - b.z) || (a.x - b.x),
+      );
+      for (const slot of ordered) {
+        this.placeCube(slot.type, slot, {
+          preview: true,
+          opacity: 0.96,
+          size: this.gridStep,
+          spin: false,
+        });
+      }
+    }
+
+    clearPlaced() {
+      this.layer.innerHTML = '';
+    }
+
+    renderGridOverlay(options) {
+      this.gridLayer.innerHTML = '';
+      const cols = Math.max(1, Number(options?.cols) || 1);
+      const rows = Math.max(1, Number(options?.rows) || 1);
+      const left = this.origin.x;
+      const top = this.origin.y;
+      const width = cols * this.gridStep;
+      const height = rows * this.gridStep;
+      const filledCells = Array.isArray(options?.filledCells) ? options.filledCells : [];
+
+      for (let x = 0; x <= cols; x += 1) {
+        const line = document.createElement('div');
+        line.className = 'grid-line';
+        line.style.left = `${left + x * this.gridStep}px`;
+        line.style.top = `${top}px`;
+        line.style.width = '1px';
+        line.style.height = `${height}px`;
+        this.gridLayer.appendChild(line);
+      }
+
+      for (let y = 0; y <= rows; y += 1) {
+        const line = document.createElement('div');
+        line.className = 'grid-line';
+        line.style.left = `${left}px`;
+        line.style.top = `${top + y * this.gridStep}px`;
+        line.style.width = `${width}px`;
+        line.style.height = '1px';
+        this.gridLayer.appendChild(line);
+      }
+
+      for (const cell of filledCells) {
+        const fill = document.createElement('div');
+        fill.className = 'grid-fill';
+        fill.style.left = `${left + cell.col * this.gridStep + 1}px`;
+        fill.style.top = `${top + cell.row * this.gridStep + 1}px`;
+        fill.style.width = `${Math.max(2, this.gridStep - 1)}px`;
+        fill.style.height = `${Math.max(2, this.gridStep - 1)}px`;
+        this.gridLayer.appendChild(fill);
+      }
+    }
+  }
+
+  class LayoutDebugEditor {
+    constructor(structureView, slots, options = {}) {
+      this.structure = structureView;
+      this.options = options;
+      this.slotsMap = new Map();
+      for (const slot of slots) {
+        this.slotsMap.set(this.key(slot.x, slot.y, slot.z), { ...slot });
+      }
+      this.grid = {
+        step: 24,
+        cols: 14,
+        rows: 14,
+        offsetCol: 0,
+        offsetRow: 0,
+      };
+      this.currentType = 'stone';
+      this.currentY = 0;
+      this.snapDistance = 16;
+      this.recalculateGridBounds();
+      this.refreshVisuals();
+    }
+
+    key(x, y, z) {
+      return `${x}|${y}|${z}`;
+    }
+
+    setCursor(type, y) {
+      this.currentType = type;
+      this.currentY = Math.max(0, Math.min(8, Number(y) || 0));
+      this.refreshGrid();
+    }
+
+    setGridStep(stepPx) {
+      this.grid.step = Math.max(12, Math.min(80, Number(stepPx) || 24));
+      this.recalculateGridBounds();
+      this.structure.setGridStep(this.grid.step);
+      this.structure.setWorldGrid(this.grid.cols, this.grid.rows, this.grid.offsetCol, this.grid.offsetRow);
+      this.refreshGrid();
+    }
+
+    setLayout(slots) {
+      this.slotsMap.clear();
+      for (const slot of slots) {
+        this.slotsMap.set(this.key(slot.x, slot.y, slot.z), { ...slot });
+      }
+      this.recalculateGridBounds();
+      this.structure.setWorldGrid(this.grid.cols, this.grid.rows, this.grid.offsetCol, this.grid.offsetRow);
+      this.refreshVisuals();
+    }
+
+    toArray() {
+      return Array.from(this.slotsMap.values())
+        .sort((a, b) => (a.z - b.z) || (a.y - b.y) || (a.x - b.x));
+    }
+
+    getCounts() {
+      const counts = { stone: 0, wood: 0, glass: 0 };
+      for (const slot of this.slotsMap.values()) {
+        if (counts[slot.type] !== undefined) {
+          counts[slot.type] += 1;
+        }
+      }
+      return counts;
+    }
+
+    buildExportPayload() {
+      return {
+        counts: this.getCounts(),
+        slots: this.toArray(),
+      };
+    }
+
+    getOccupiedKeys() {
+      const set = new Set();
+      for (const slot of this.slotsMap.values()) {
+        set.add(this.key(slot.x, slot.y, slot.z));
+      }
+      return set;
+    }
+
+    recalculateGridBounds() {
+      let maxCol = 0;
+      let maxRow = 0;
+      let minCol = Infinity;
+      let minRow = Infinity;
+      for (const slot of this.slotsMap.values()) {
+        maxCol = Math.max(maxCol, slot.x);
+        maxRow = Math.max(maxRow, slot.z);
+        minCol = Math.min(minCol, slot.x);
+        minRow = Math.min(minRow, slot.z);
+      }
+      if (!Number.isFinite(minCol)) {
+        minCol = 0;
+      }
+      if (!Number.isFinite(minRow)) {
+        minRow = 0;
+      }
+
+      const offsetCol = Math.max(0, minCol - 1);
+      const offsetRow = Math.max(0, minRow - 1);
+      const spanCols = Math.max(1, maxCol - offsetCol + 2);
+      const spanRows = Math.max(1, maxRow - offsetRow + 2);
+
+      this.grid.offsetCol = offsetCol;
+      this.grid.offsetRow = offsetRow;
+      this.grid.cols = Math.max(10, Math.min(24, spanCols));
+      this.grid.rows = Math.max(10, Math.min(24, spanRows));
+      this.structure.setWorldGrid(this.grid.cols, this.grid.rows, this.grid.offsetCol, this.grid.offsetRow);
+    }
+
+    slotToGridCell(slot) {
+      return {
+        col: slot.x - this.grid.offsetCol,
+        row: slot.z - this.grid.offsetRow,
+      };
+    }
+
+    gridCellToSlot(col, row, y = this.currentY) {
+      return {
+        x: col + this.grid.offsetCol,
+        y,
+        z: row + this.grid.offsetRow,
+      };
+    }
+
+    getFilledCellsForCurrentLayer() {
+      const filled = [];
+      for (const slot of this.slotsMap.values()) {
+        if (slot.y !== this.currentY) {
+          continue;
+        }
+        const cell = this.slotToGridCell(slot);
+        if (cell.col < 0 || cell.col >= this.grid.cols || cell.row < 0 || cell.row >= this.grid.rows) {
+          continue;
+        }
+        filled.push(cell);
+      }
+      return filled;
+    }
+
+    refreshGrid() {
+      this.structure.renderGridOverlay({
+        cols: this.grid.cols,
+        rows: this.grid.rows,
+        layerY: this.currentY,
+        filledCells: this.getFilledCellsForCurrentLayer(),
+      });
+    }
+
+    refreshVisuals() {
+      this.structure.setGridStep(this.grid.step);
+      this.structure.renderFinalPreview(this.toArray());
+      this.refreshGrid();
+      if (typeof this.options.onChange === 'function') {
+        this.options.onChange(this.buildExportPayload());
+      }
+    }
+
+    findNearestCell(localPoint) {
+      const localX = localPoint.x - this.structure.origin.x;
+      const localY = localPoint.y - this.structure.origin.y;
+      const col = Math.floor(localX / this.grid.step);
+      const row = Math.floor(localY / this.grid.step);
+      if (col < 0 || row < 0 || col >= this.grid.cols || row >= this.grid.rows) {
+        return null;
+      }
+      return this.gridCellToSlot(col, row);
+    }
+
+    getTopYAt(x, z) {
+      let top = -1;
+      for (const slot of this.slotsMap.values()) {
+        if (slot.x === x && slot.z === z) {
+          top = Math.max(top, slot.y);
+        }
+      }
+      return top;
+    }
+
+    addOrReplaceAt(cell, type = this.currentType) {
+      const topY = this.getTopYAt(cell.x, cell.z);
+      const targetY = this.currentY <= topY ? topY + 1 : cell.y;
+      this.slotsMap.set(this.key(cell.x, targetY, cell.z), {
+        x: cell.x,
+        y: targetY,
+        z: cell.z,
+        type,
+      });
+      this.refreshVisuals();
+    }
+
+    removeAt(cell) {
+      if (this.slotsMap.delete(this.key(cell.x, cell.y, cell.z))) {
+        this.refreshVisuals();
+        return;
+      }
+      const topY = this.getTopYAt(cell.x, cell.z);
+      if (topY >= 0) {
+        this.slotsMap.delete(this.key(cell.x, topY, cell.z));
+      }
+      this.refreshVisuals();
+    }
+
+    clearAll() {
+      this.slotsMap.clear();
+      this.refreshVisuals();
+    }
+  }
+
+  const inventory = new InventoryManager(BLOCK_DEFS, countEls);
+  let layout = new BuildLayoutManager(BUILD_LAYOUT);
+  const structure = new StructureView(wallEl);
+  const debugEditor = DEBUG_LAYOUT_EDITOR
+    ? new LayoutDebugEditor(structure, BUILD_LAYOUT, {
+        onChange(payload) {
+          debugOutputEl.value = JSON.stringify(payload, null, 2);
+        },
+      })
+    : null;
+
+  if (DEBUG_SHOW_FINAL_STRUCTURE && !debugEditor) {
+    structure.renderFinalPreview(BUILD_LAYOUT);
+  }
+
+  if (debugPanelEl) {
+    debugPanelEl.style.display = DEBUG_LAYOUT_EDITOR ? 'block' : 'none';
+  }
+
+  let debugUIVisible = DEBUG_LAYOUT_EDITOR;
+  function isEditableTarget(target) {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+    const tag = target.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
+  }
+
+  function setDebugUIVisible(visible) {
+    debugUIVisible = Boolean(visible);
+    if (debugPanelEl) {
+      debugPanelEl.style.display = debugUIVisible && DEBUG_LAYOUT_EDITOR ? 'block' : 'none';
+    }
+    structure.gridLayer.style.display = debugUIVisible ? '' : 'none';
+  }
+
+  document.addEventListener('keydown', (event) => {
+    if (event.code !== 'Space' || isEditableTarget(event.target)) {
+      return;
+    }
+    event.preventDefault();
+    setDebugUIVisible(!debugUIVisible);
+  });
+
+  function applyDebugLayoutToGame(payload) {
+    const slots = Array.isArray(payload?.slots) ? payload.slots : [];
+    const counts = payload?.counts || {};
+    layout = new BuildLayoutManager(slots);
+    inventory.setFromCounts(counts);
+    structure.clearPlaced();
+  }
+
+  if (debugEditor) {
+    const syncCursor = () => {
+      debugEditor.setCursor(debugTypeEl.value, Number(debugYEl.value));
+    };
+    const syncGridStep = () => {
+      debugEditor.setGridStep(Number(debugGridStepEl.value));
+    };
+    syncCursor();
+    syncGridStep();
+    debugTypeEl.addEventListener('change', syncCursor);
+    debugYEl.addEventListener('input', syncCursor);
+    debugGridStepEl.addEventListener('input', syncGridStep);
+
+    debugApplyBtn.addEventListener('click', () => {
+      applyDebugLayoutToGame(debugEditor.buildExportPayload());
+    });
+
+    debugClearBtn.addEventListener('click', () => {
+      debugEditor.clearAll();
+    });
+
+    debugExportBtn.addEventListener('click', async () => {
+      const payload = debugEditor.buildExportPayload();
+      const text = JSON.stringify(payload, null, 2);
+      debugOutputEl.value = text;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (error) {
+        // Clipboard can fail without secure context, keep text in textarea.
+      }
+    });
+
+    debugImportBtn.addEventListener('click', () => {
+      try {
+        const payload = JSON.parse(debugOutputEl.value || '{}');
+        const slots = Array.isArray(payload?.slots) ? payload.slots : [];
+        debugEditor.setLayout(slots);
+      } catch (error) {
+        alert(`Import error: ${error.message}`);
+      }
+    });
+
+    wallEl.addEventListener('click', (event) => {
+      const rect = wallEl.getBoundingClientRect();
+      const local = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
+      const cell = debugEditor.findNearestCell(local);
+      if (!cell) {
+        return;
+      }
+      debugEditor.addOrReplaceAt(cell);
+    });
+
+    wallEl.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      const rect = wallEl.getBoundingClientRect();
+      const local = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
+      const cell = debugEditor.findNearestCell(local);
+      if (!cell) {
+        return;
+      }
+      debugEditor.removeAt(cell);
+    });
+  }
+
+  setDebugUIVisible(DEBUG_LAYOUT_EDITOR);
+
+  function linear(t) {
+    return t;
+  }
+
+  function easeInOut(t) {
+    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  }
+
+  function animatePolylineCenter(el, size, points, duration, easingFn) {
+    const segments = [];
+    let totalLen = 0;
+
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const a = points[i];
+      const b = points[i + 1];
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      segments.push({ a, b, len, acc: totalLen });
+      totalLen += len;
+    }
+
+    if (totalLen === 0) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+      const start = performance.now();
+
+      function frame(now) {
+        const raw = Math.min(1, (now - start) / duration);
+        const p = easingFn(raw);
+        const target = p * totalLen;
+
+        let seg = segments[segments.length - 1];
+        for (let i = 0; i < segments.length; i += 1) {
+          if (target <= segments[i].acc + segments[i].len) {
+            seg = segments[i];
+            break;
+          }
+        }
+
+        const local = seg.len > 0 ? (target - seg.acc) / seg.len : 0;
+        const x = seg.a.x + (seg.b.x - seg.a.x) * local;
+        const y = seg.a.y + (seg.b.y - seg.a.y) * local;
+        el.style.left = `${x - size / 2}px`;
+        el.style.top = `${y - size / 2}px`;
+        if (typeof el._onPoint === 'function') {
+          el._onPoint({ x, y, raw });
+        }
+
+        if (raw < 1) {
+          requestAnimationFrame(frame);
+        } else {
+          resolve();
+        }
+      }
+
+      requestAnimationFrame(frame);
+    });
+  }
+
+  function animatePointToPoint(el, from, to, duration = 380, easingFn = easeInOut) {
+    return new Promise((resolve) => {
+      const start = performance.now();
+
+      function frame(now) {
+        const raw = Math.min(1, (now - start) / duration);
+        const p = easingFn(raw);
+        const x = from.x + (to.x - from.x) * p;
+        const y = from.y + (to.y - from.y) * p;
+        el.style.left = `${x - el.offsetWidth / 2}px`;
+        el.style.top = `${y - el.offsetHeight / 2}px`;
+        if (raw < 1) {
+          requestAnimationFrame(frame);
+        } else {
+          resolve();
+        }
+      }
+
+      requestAnimationFrame(frame);
+    });
+  }
+
+  function wallLocalToScreen(point) {
+    const screenRect = screenEl.getBoundingClientRect();
+    const wallRect = wallEl.getBoundingClientRect();
+    return {
+      x: wallRect.left - screenRect.left + point.x,
+      y: wallRect.top - screenRect.top + point.y,
+    };
+  }
+
+  async function spawnStructureCube(type, spawnPoint) {
+    const slot = layout.claimNext(type);
+    if (!slot) {
+      return;
+    }
+    if (!inventory.consume(type)) {
+      slot.placed = false;
+      return;
+    }
+
+    const flyCube = structure.createCubeNode(type, 22, { spin: false });
+    flyCube.classList.add('is-moving');
+    flyCube.style.left = `${spawnPoint.x - 11}px`;
+    flyCube.style.top = `${spawnPoint.y - 11}px`;
+    flyCube.style.width = '22px';
+    flyCube.style.height = '22px';
+    flyCube.style.zIndex = '16';
+    screenEl.appendChild(flyCube);
+
+    const centerPoint = wallLocalToScreen({
+      x: wallEl.clientWidth * 0.5,
+      y: wallEl.clientHeight * 0.5,
+    });
+    const targetWallPoint = structure.project(slot);
+    const targetScreenPoint = wallLocalToScreen(targetWallPoint);
+
+    try {
+      await animatePointToPoint(flyCube, spawnPoint, centerPoint, 340, easeInOut);
+      await animatePointToPoint(flyCube, centerPoint, targetScreenPoint, 280, easeInOut);
+    } finally {
+      flyCube.remove();
+      structure.placeCube(type, slot);
+    }
+  }
+
+  async function runBlockMotion(sourceWrap) {
+    if (activeMotion) {
+      return;
+    }
+    const type = sourceWrap.dataset.blockType;
+    if (!type) {
+      return;
+    }
+    const canSpawn = Math.min(inventory.get(type), layout.getRemaining(type));
+    if (canSpawn <= 0) {
+      return;
+    }
+
+    activeMotion = true;
+
+    const screenRect = screenEl.getBoundingClientRect();
+    const sourceRect = sourceWrap.getBoundingClientRect();
+    const wallRect = wallEl.getBoundingClientRect();
+
+    const size = sourceRect.width;
+    const origin = {
+      x: sourceRect.left - screenRect.left + size / 2,
+      y: sourceRect.top - screenRect.top + size / 2,
+    };
+    const loop = pathConfig.loopBoardPoints.map((p) => ({
+      x: wallRect.left - screenRect.left + p.x,
+      y: wallRect.top - screenRect.top + p.y,
+    }));
+    const entry = loop[0];
+
+    const moving = sourceWrap.cloneNode(true);
+    moving.classList.add('is-moving');
+    moving.style.left = `${origin.x - size / 2}px`;
+    moving.style.top = `${origin.y - size / 2}px`;
+    moving.style.width = `${size}px`;
+    moving.style.height = `${size}px`;
+    moving.style.pointerEvents = 'none';
+
+    sourceWrap.style.visibility = 'hidden';
+    screenEl.appendChild(moving);
+
+    let placedInThisRun = 0;
+    let distanceSinceSpawn = 0;
+    let lastPoint = null;
+    const spawnEveryPixels = 145;
+
+    moving._onPoint = (point) => {
+      if (lastPoint) {
+        distanceSinceSpawn += Math.hypot(point.x - lastPoint.x, point.y - lastPoint.y);
+      }
+      lastPoint = point;
+
+      while (distanceSinceSpawn >= spawnEveryPixels && placedInThisRun < canSpawn) {
+        distanceSinceSpawn -= spawnEveryPixels;
+        placedInThisRun += 1;
+        const spawnPromise = spawnStructureCube(type, { x: point.x, y: point.y })
+          .finally(() => pendingSpawnAnimations.delete(spawnPromise));
+        pendingSpawnAnimations.add(spawnPromise);
+      }
+    };
+
+    try {
+      await animatePolylineCenter(moving, size, [origin, entry], 420, easeInOut);
+      await animatePolylineCenter(moving, size, [...loop, entry], 4400, linear);
+      await animatePolylineCenter(moving, size, [entry, origin], 460, easeInOut);
+      await Promise.all(Array.from(pendingSpawnAnimations));
+    } finally {
+      moving.remove();
+      sourceWrap.style.visibility = '';
+      activeMotion = false;
+    }
+  }
+
+  blockEls.forEach((wrap) => {
+    wrap.addEventListener('click', () => {
+      runBlockMotion(wrap);
+    });
+  });
+</script>
 </body>
 </html>

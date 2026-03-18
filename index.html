@@ -3,58 +3,44 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Scene Builder</title>
-    <style>
-      body {
-        margin: 0;
-        min-height: 100vh;
-        display: grid;
-        place-items: center;
-        background: #0f1218;
-        color: #ecf1f8;
-        font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
-      }
-      .box {
-        background: #171c25;
-        border: 1px solid #2a2f3a;
-        border-radius: 12px;
-        padding: 24px;
-        width: min(560px, 92vw);
-      }
-      h1 {
-        margin: 0 0 12px;
-      }
-      p {
-        color: #99a3b5;
-      }
-      .row {
-        display: flex;
-        gap: 10px;
-        margin-top: 16px;
-        flex-wrap: wrap;
-      }
-      a {
-        display: inline-block;
-        text-decoration: none;
-        color: #ecf1f8;
-        border: 1px solid #2a2f3a;
-        border-radius: 8px;
-        padding: 10px 14px;
-        background: #121722;
-      }
-      a:hover {
-        border-color: #43baff;
-      }
-    </style>
+    <title>3D Build Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="box">
-      <h1>Local 2D Scene Builder</h1>
-      <p>Выберите режим: редактор для сборки сцены или runtime для просмотра JSON как игровой сцены.</p>
-      <div class="row">
-        <a href="./editor.html">Open Editor</a>
-        <a href="./runtime.html">Open Runtime</a>
+    <canvas id="app"></canvas>
+
+    <div id="ui-panel" class="ui-panel">
+      <div class="ui-track"></div>
+      <div id="slots" class="slots"></div>
+    </div>
+
+    <div id="debug-editor" class="debug-editor">
+      <div class="debug-title">Level Debug</div>
+      <label class="debug-row">
+        <span>Mode</span>
+        <input id="editor-enabled" type="checkbox" />
+      </label>
+      <label class="debug-row">
+        <span>Block</span>
+        <select id="editor-block">
+          <option value="stone">Stone</option>
+          <option value="wood">Wood</option>
+          <option value="grass">Grass</option>
+          <option value="erase">Erase</option>
+        </select>
+      </label>
+      <label class="debug-row">
+        <span>Layer Y</span>
+        <input id="editor-layer" type="number" min="0" max="8" value="0" />
+      </label>
+      <div class="debug-actions">
+        <button id="editor-clear" type="button">Clear</button>
+        <button id="editor-export" type="button">Export JSON</button>
       </div>
     </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
+    <script src="./js/prototype/texture-data.js"></script>
+    <script src="./js/prototype/app.js"></script>
   </body>
 </html>
