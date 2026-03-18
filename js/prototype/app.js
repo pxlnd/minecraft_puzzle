@@ -44,6 +44,27 @@
     repeatX: 4,
     repeatY: 4,
   });
+  const DEFAULT_EDITOR_LEVEL = {
+    blocks: [
+      { type: 'stone', x: 6, y: 0, z: -3 },
+      { type: 'stone', x: 6, y: 0, z: -2 },
+      { type: 'stone', x: 6, y: 0, z: -1 },
+      { type: 'stone', x: 6, y: 0, z: 0 },
+      { type: 'stone', x: 6, y: 0, z: 1 },
+      { type: 'stone', x: 6, y: 0, z: 2 },
+      { type: 'stone', x: -4, y: 0, z: 3 },
+      { type: 'stone', x: -3, y: 0, z: 3 },
+      { type: 'stone', x: -2, y: 0, z: 3 },
+      { type: 'stone', x: -1, y: 0, z: 3 },
+      { type: 'stone', x: 0, y: 0, z: 3 },
+      { type: 'stone', x: 1, y: 0, z: 3 },
+      { type: 'stone', x: 2, y: 0, z: 3 },
+      { type: 'stone', x: 3, y: 0, z: 3 },
+      { type: 'stone', x: 4, y: 0, z: 3 },
+      { type: 'stone', x: 5, y: 0, z: 3 },
+      { type: 'stone', x: 6, y: 0, z: 3 },
+    ],
+  };
 
   function easeOutCubic(t) {
     return 1 - (1 - t) ** 3;
@@ -219,113 +240,77 @@
     }
   }
 
-  function createHousePositions() {
-    const unit = 0.64;
-    const baseY = 0.34;
-    const used = new Set();
-    const result = [];
-
-    function add(x, level, z) {
-      const key = `${x}:${level}:${z}`;
-      if (used.has(key)) {
-        return;
-      }
-      used.add(key);
-      result.push(new THREE.Vector3(x * unit, baseY + level * unit, z * unit));
-    }
-
-    // 1) Floor slab (12 blocks): x -2..1, z -1..1
-    for (let z = -1; z <= 1; z += 1) {
-      for (let x = -2; x <= 1; x += 1) {
-        add(x, 0, z);
-      }
-    }
-
-    // 2) First wall layer with doorway on the front (9 blocks)
-    for (let x = -2; x <= 1; x += 1) {
-      add(x, 1, -1); // back wall
-      if (x !== -1) {
-        add(x, 1, 1); // front wall with one-tile door gap
-      }
-    }
-    add(-2, 1, 0);
-    add(1, 1, 0);
-
-    // 3) Second wall layer + front supports (8 blocks)
-    for (let x = -2; x <= 1; x += 1) {
-      add(x, 2, -1); // back wall top row
-    }
-    add(-2, 2, 0);
-    add(1, 2, 0);
-    add(-2, 2, 1);
-    add(0, 2, 1);
-
-    // 4) Roof body (6 blocks)
-    for (let z = -1; z <= 0; z += 1) {
-      for (let x = -1; x <= 1; x += 1) {
-        add(x, 3, z);
-      }
-    }
-
-    // 5) Roof cap (4 blocks)
-    for (let z = -1; z <= 0; z += 1) {
-      for (let x = 0; x <= 1; x += 1) {
-        add(x, 4, z);
-      }
-    }
-
-    return result;
-  }
-
   class BuildManager {
-    constructor(scene) {
+    constructor(scene, options) {
       this.scene = scene;
-      this.slots = createHousePositions().map((position) => ({ position, state: 'free' }));
-      this.markerMeshes = [];
+      this.cellSize = options.cellSize;
+      this.baseY = options.baseY;
+      this.createMaterial = options.createMaterial;
+      this.slots = [];
       this.builtMeshes = [];
+    }
 
-      const markerGeometry = new THREE.BoxGeometry(0.58, 0.58, 0.58);
-      for (const slot of this.slots) {
-        const marker = new THREE.Mesh(
-          markerGeometry,
-          new THREE.MeshStandardMaterial({
-            color: 0xd9c8b7,
-            transparent: true,
-            opacity: 0.12,
-            roughness: 0.7,
-            metalness: 0,
-          }),
-        );
-        marker.position.copy(slot.position);
-        this.scene.add(marker);
-        this.markerMeshes.push(marker);
+    loadFromLevel(data) {
+      for (const mesh of this.builtMeshes) {
+        this.scene.remove(mesh);
+        mesh.geometry.dispose();
+        mesh.material.dispose();
+      }
+      this.builtMeshes = [];
+      this.slots = [];
+
+      const list = data && Array.isArray(data.blocks) ? data.blocks : [];
+      const unique = new Set();
+      for (const item of list) {
+        const x = Number(item.x);
+        const y = Number(item.y);
+        const z = Number(item.z);
+        const type = item.type || 'stone';
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+          continue;
+        }
+        const key = `${x}:${y}:${z}`;
+        if (unique.has(key)) {
+          continue;
+        }
+        unique.add(key);
+        this.slots.push({
+          type,
+          position: new THREE.Vector3(
+            x * this.cellSize,
+            this.baseY + y * this.cellSize,
+            z * this.cellSize,
+          ),
+          state: 'free',
+        });
       }
     }
 
-    reserveNext() {
+    reserveNext(type) {
       for (let i = 0; i < this.slots.length; i += 1) {
         if (this.slots[i].state !== 'free') {
           continue;
         }
+        if (this.slots[i].type !== type) {
+          continue;
+        }
         this.slots[i].state = 'reserved';
-        this.markerMeshes[i].material.opacity = 0.03;
         return { index: i, position: this.slots[i].position.clone() };
       }
       return null;
     }
 
-    commit(index, type, color) {
+    commit(index) {
       const slot = this.slots[index];
       if (!slot || slot.state !== 'reserved') {
         return false;
       }
 
       slot.state = 'built';
-      this.markerMeshes[index].visible = false;
 
       const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(0.58, 0.58, 0.58),
-        createBlockMaterial(type, color),
+        this.createMaterial(slot.type, 0xffffff),
       );
       mesh.position.copy(slot.position);
       mesh.castShadow = true;
@@ -640,7 +625,7 @@
         return false;
       }
 
-      const reserved = this.buildManager.reserveNext();
+      const reserved = this.buildManager.reserveNext(this.type);
       if (!reserved) {
         return false;
       }
@@ -681,7 +666,7 @@
           this.scene.remove(projectile.mesh);
           projectile.mesh.geometry.dispose();
           projectile.mesh.material.dispose();
-          this.buildManager.commit(projectile.index, this.type, this.color);
+          this.buildManager.commit(projectile.index);
           this.projectiles.splice(i, 1);
           continue;
         }
@@ -883,6 +868,29 @@
       this.cells.set(key, { type: this.selectedType, x, y, z, mesh });
     }
 
+    placeBlock(type, x, y, z) {
+      if (x < this.minX || x > this.maxX || z < this.minZ || z > this.maxZ || y < 0 || y > 8) {
+        return;
+      }
+      const key = this.getCellKey(x, y, z);
+      const existing = this.cells.get(key);
+      if (existing) {
+        this.group.remove(existing.mesh);
+        existing.mesh.geometry.dispose();
+        existing.mesh.material.dispose();
+      }
+
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(this.boxSize, this.boxSize, this.boxSize),
+        this.createMaterial(type, 0xffffff),
+      );
+      mesh.position.copy(this.cellToPosition(x, y, z));
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.group.add(mesh);
+      this.cells.set(key, { type, x, y, z, mesh });
+    }
+
     clear() {
       for (const entry of this.cells.values()) {
         this.group.remove(entry.mesh);
@@ -897,6 +905,14 @@
         .map(({ type, x, y, z }) => ({ type, x, y, z }))
         .sort((a, b) => (a.y - b.y) || (a.z - b.z) || (a.x - b.x));
       return JSON.stringify({ blocks }, null, 2);
+    }
+
+    loadJSON(data) {
+      this.clear();
+      const list = data && Array.isArray(data.blocks) ? data.blocks : [];
+      for (const block of list) {
+        this.placeBlock(block.type || 'stone', Number(block.x), Number(block.y), Number(block.z));
+      }
     }
   }
 
@@ -950,7 +966,12 @@
   scene.add(worldGround);
 
   const trackController = new TrackController(scene);
-  const buildManager = new BuildManager(scene);
+  const buildManager = new BuildManager(scene, {
+    cellSize: 0.64,
+    baseY: 0.34,
+    createMaterial: createBlockMaterial,
+  });
+  buildManager.loadFromLevel(DEFAULT_EDITOR_LEVEL);
   const editor = new LevelEditor({
     scene,
     camera,
@@ -963,6 +984,7 @@
     maxZ: 4,
     createMaterial: createBlockMaterial,
   });
+  editor.loadJSON(DEFAULT_EDITOR_LEVEL);
 
   let activeBlockId = null;
 
@@ -1071,6 +1093,7 @@
     const layerInput = document.getElementById('editor-layer');
     const clearBtn = document.getElementById('editor-clear');
     const exportBtn = document.getElementById('editor-export');
+    const applyBtn = document.getElementById('editor-apply');
 
     enabledInput.addEventListener('change', () => {
       editor.setEnabled(enabledInput.checked);
@@ -1097,6 +1120,14 @@
         console.warn('Clipboard write failed, showing JSON in prompt', error);
       }
       window.prompt('Level JSON', text);
+    });
+
+    applyBtn.addEventListener('click', () => {
+      if (activeBlockId !== null) {
+        return;
+      }
+      const data = JSON.parse(editor.exportJSON());
+      buildManager.loadFromLevel(data);
     });
 
     editor.setType(blockSelect.value);

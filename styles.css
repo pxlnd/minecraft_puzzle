@@ -153,6 +153,10 @@ body {
   gap: 8px;
 }
 
+#editor-apply {
+  grid-column: 1 / -1;
+}
+
 .debug-actions button {
   background: rgba(176, 105, 58, 0.8);
   color: #fff2e5;
