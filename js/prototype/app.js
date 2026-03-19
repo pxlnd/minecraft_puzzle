@@ -358,39 +358,18 @@
       return blocks;
     })(),
   };
-  const DEFAULT_RAILS_LAYOUT = (() => {
-    const rails = [];
-    const halfW = 8;
-    const halfH = 5;
-    const quarter = Math.PI * 0.5;
-
-    // Top side (z = -5)
-    rails.push({ type: 'corner', x: -halfW, z: -halfH, yaw: Math.PI });
-    for (let x = -halfW + 1; x <= halfW - 1; x += 1) {
-      rails.push({ type: 'straight', x, z: -halfH, yaw: quarter });
-    }
-    rails.push({ type: 'corner', x: halfW, z: -halfH, yaw: Math.PI * 1.5 });
-
-    // Right side (x = 8)
-    for (let z = -halfH + 1; z <= halfH - 1; z += 1) {
-      rails.push({ type: 'straight', x: halfW, z, yaw: 0 });
-    }
-
-    // Bottom side (z = 5)
-    rails.push({ type: 'corner', x: -halfW, z: halfH, yaw: quarter });
-    for (let x = -halfW + 1; x <= halfW - 1; x += 1) {
-      rails.push({ type: 'straight', x, z: halfH, yaw: quarter });
-    }
-    rails.push({ type: 'corner', x: halfW, z: halfH, yaw: 0 });
-
-    // Left side (x = -8)
-    for (let z = -halfH + 1; z <= halfH - 1; z += 1) {
-      rails.push({ type: 'straight', x: -halfW, z, yaw: 0 });
-    }
-
-    rails.sort((a, b) => (a.z - b.z) || (a.x - b.x));
-    return rails;
-  })();
+  const DEFAULT_RAILS_LAYOUT = [
+    { type: 'straight', x: -1, z: 5, yaw: Math.PI * 0.5 },
+    { type: 'straight', x: 0, z: 5, yaw: Math.PI * 0.5 },
+    { type: 'straight', x: 1, z: 5, yaw: Math.PI * 0.5 },
+    { type: 'straight', x: 2, z: 5, yaw: Math.PI * 0.5 },
+    { type: 'straight', x: 3, z: 5, yaw: Math.PI * 0.5 },
+    { type: 'straight', x: 4, z: 5, yaw: Math.PI * 0.5 },
+    { type: 'straight', x: 5, z: 5, yaw: Math.PI * 0.5 },
+    { type: 'straight', x: 6, z: 5, yaw: Math.PI * 0.5 },
+    { type: 'straight', x: 7, z: 5, yaw: Math.PI * 1.5 },
+    { type: 'corner', x: 8, z: 5, yaw: 0 },
+  ];
 
   function easeOutCubic(t) {
     return 1 - (1 - t) ** 3;
@@ -1166,6 +1145,7 @@
       this.slots = [];
       this.builtMeshes = [];
       this.shadowPlane = null;
+      this.center = new THREE.Vector3(0, this.baseY, 0);
     }
 
     loadFromLevel(data) {
@@ -1212,14 +1192,23 @@
       if (this.slots.length > 0) {
         let minX = Infinity;
         let maxX = -Infinity;
+        let minY = Infinity;
+        let maxY = -Infinity;
         let minZ = Infinity;
         let maxZ = -Infinity;
         for (const slot of this.slots) {
           minX = Math.min(minX, slot.position.x);
           maxX = Math.max(maxX, slot.position.x);
+          minY = Math.min(minY, slot.position.y);
+          maxY = Math.max(maxY, slot.position.y);
           minZ = Math.min(minZ, slot.position.z);
           maxZ = Math.max(maxZ, slot.position.z);
         }
+        this.center.set(
+          (minX + maxX) * 0.5,
+          (minY + maxY) * 0.5,
+          (minZ + maxZ) * 0.5,
+        );
 
         const pad = this.cellSize * 1.1;
         const width = Math.max(this.cellSize, (maxX - minX) + this.cellSize + pad);
@@ -1240,16 +1229,70 @@
       }
     }
 
-    reserveNext(type) {
+    reserveNext(type, origin = null, forward = null) {
+      let selectedIndex = -1;
+      let selectedDistanceSq = Infinity;
+      const hasOrigin = origin && Number.isFinite(origin.x) && Number.isFinite(origin.z);
+      const sideX = hasOrigin ? origin.x - this.center.x : 0;
+      const sideZ = hasOrigin ? origin.z - this.center.z : 0;
+      const sideLen = Math.hypot(sideX, sideZ);
+      const nx = sideLen > 1e-6 ? sideX / sideLen : 0;
+      const nz = sideLen > 1e-6 ? sideZ / sideLen : 0;
+      const hasForward = forward && Number.isFinite(forward.x) && Number.isFinite(forward.z);
+      const fwdLen = hasForward ? Math.hypot(forward.x, forward.z) : 0;
+      const fx = fwdLen > 1e-6 ? forward.x / fwdLen : 0;
+      const fz = fwdLen > 1e-6 ? forward.z / fwdLen : 0;
       for (let i = 0; i < this.slots.length; i += 1) {
-        if (this.slots[i].state !== 'free') {
+        const slot = this.slots[i];
+        if (slot.state !== 'free') {
           continue;
         }
-        if (this.slots[i].type !== type) {
+        if (slot.type !== type) {
           continue;
         }
-        this.slots[i].state = 'reserved';
-        return { index: i, position: this.slots[i].position.clone() };
+        if (hasOrigin) {
+          const slotSideX = slot.position.x - this.center.x;
+          const slotSideZ = slot.position.z - this.center.z;
+          const sideDot = (slotSideX * sideX) + (slotSideZ * sideZ);
+          if (sideDot < 0) {
+            continue;
+          }
+          // Keep targets only in the near-side cone (about 60 deg around outward normal).
+          const slotSideLen = Math.hypot(slotSideX, slotSideZ);
+          if (slotSideLen > 1e-6 && sideLen > 1e-6) {
+            const sx = slotSideX / slotSideLen;
+            const sz = slotSideZ / slotSideLen;
+            const cosAngle = (sx * nx) + (sz * nz);
+            if (cosAngle < 0.5) {
+              continue;
+            }
+          }
+        }
+        if (hasOrigin && fwdLen > 1e-6) {
+          const toSlotX = slot.position.x - origin.x;
+          const toSlotZ = slot.position.z - origin.z;
+          const toLen = Math.hypot(toSlotX, toSlotZ);
+          if (toLen > 1e-6) {
+            const tx = toSlotX / toLen;
+            const tz = toSlotZ / toLen;
+            const forwardDot = (tx * fx) + (tz * fz);
+            // Only targets in front of the moving cart.
+            if (forwardDot <= 0.1) {
+              continue;
+            }
+          }
+        }
+        const distanceSq = hasOrigin
+          ? slot.position.distanceToSquared(origin)
+          : slot.position.distanceToSquared(this.center);
+        if (distanceSq < selectedDistanceSq) {
+          selectedDistanceSq = distanceSq;
+          selectedIndex = i;
+        }
+      }
+      if (selectedIndex >= 0) {
+        this.slots[selectedIndex].state = 'reserved';
+        return { index: selectedIndex, position: this.slots[selectedIndex].position.clone() };
       }
       return null;
     }
@@ -1285,6 +1328,14 @@
 
     getTotalCount() {
       return this.slots.length;
+    }
+
+    getSlotTypeCounts() {
+      const counts = {};
+      for (const slot of this.slots) {
+        counts[slot.type] = (counts[slot.type] || 0) + 1;
+      }
+      return counts;
     }
 
     setVisible(visible) {
@@ -1649,15 +1700,14 @@
       this.mesh.add(this.countSprite);
 
       this.updateCountVisual();
+      this.mesh.visible = this.count > 0;
       this.scene.add(this.mesh);
     }
 
     setUiAnchor(position) {
       this.uiAnchor.copy(position);
-      if (this.state === 'idle' && this.count > 0) {
-        this.mesh.position.copy(this.uiAnchor);
-        this.mesh.position.y += 0.52;
-      }
+      this.mesh.position.copy(this.uiAnchor);
+      this.mesh.position.y += 0.52;
     }
 
     canStartCycle() {
@@ -1666,6 +1716,19 @@
 
     getCount() {
       return this.count;
+    }
+
+    setCount(count) {
+      const next = Math.max(0, Math.floor(Number(count) || 0));
+      this.count = next;
+      this.mesh.visible = next > 0;
+      if (next > 0 && this.state === 'depleted') {
+        this.state = 'idle';
+        this.mesh.position.copy(this.uiAnchor);
+        this.mesh.position.y += 0.52;
+        this.mesh.rotation.set(0, 0, 0);
+      }
+      this.updateCountVisual();
     }
 
     startCycle() {
@@ -1729,15 +1792,20 @@
       }
 
       const cargoPos = this.minecart.getCargoAnchor(TEMP_A);
+      const cargoForward = this.minecart.getForward(TEMP_B);
       this.mesh.position.copy(cargoPos);
       this.mesh.rotation.set(0, 0, 0);
 
       this.spawnTimer += dt;
       while (this.spawnTimer >= this.spawnInterval) {
         this.spawnTimer -= this.spawnInterval;
-        if (!this.spawnPiece(cargoPos)) {
+        const spawnResult = this.spawnPiece(cargoPos, cargoForward);
+        if (spawnResult === 'finished' || spawnResult === 'depleted') {
           this.spawnTimer = 0;
           this.phaseTime = this.dispatchDuration;
+          break;
+        }
+        if (spawnResult === 'waiting-side') {
           break;
         }
       }
@@ -1783,14 +1851,18 @@
       this.mesh.rotation.x = Math.sin(this.idleTime * 1.25 + this.idleSeed) * 0.05;
     }
 
-    spawnPiece(origin) {
+    spawnPiece(origin, forward) {
       if (this.count <= 0) {
-        return false;
+        return 'depleted';
       }
 
-      const reserved = this.buildManager.reserveNext(this.type);
+      if (!this.buildManager.hasFreeSlotForType(this.type)) {
+        return 'finished';
+      }
+
+      const reserved = this.buildManager.reserveNext(this.type, origin || this.mesh.position, forward || null);
       if (!reserved) {
-        return false;
+        return 'waiting-side';
       }
 
       this.count -= 1;
@@ -1814,10 +1886,10 @@
         to: reserved.position,
         index: reserved.index,
         progress: 0,
-        duration: 0.62 + Math.random() * 0.18,
+        duration: 0.09,
       });
 
-      return true;
+      return 'spawned';
     }
 
     updateProjectiles(dt) {
@@ -1836,9 +1908,6 @@
 
         const eased = easeOutCubic(projectile.progress);
         projectile.mesh.position.lerpVectors(projectile.from, projectile.to, eased);
-        projectile.mesh.position.y += Math.sin(Math.PI * eased) * 1.25;
-        projectile.mesh.rotation.x += dt * 4;
-        projectile.mesh.rotation.z += dt * 3.2;
       }
     }
 
@@ -1997,6 +2066,10 @@
     getCargoAnchor(target = new THREE.Vector3()) {
       target.copy(this._cargoLocal);
       return this.group.localToWorld(target);
+    }
+
+    getForward(target = new THREE.Vector3()) {
+      return this.group.getWorldDirection(target).normalize();
     }
   }
 
@@ -2340,7 +2413,7 @@
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x6e9f57);
-  scene.fog = new THREE.Fog(0x6e9f57, 25, 50);
+  scene.fog = null;
 
   const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 120);
   camera.position.set(14.5, 16, 14.5);
@@ -2395,6 +2468,234 @@
   const LEGACY_RAILS_STORAGE_KEYS = ['prototype:rails_layout_v2', 'prototype:rails_layout_v1'];
   const debugEditor = document.getElementById('debug-editor');
   let uiHidden = false;
+  let flyCamEnabled = false;
+  let flyCamRestoreState = null;
+  let syncCameraInputsFromState = null;
+  let flyLookActive = false;
+  let flyYawDeg = 0;
+  let flyPitchDeg = 0;
+  const flyMoveState = {
+    KeyW: false,
+    KeyA: false,
+    KeyS: false,
+    KeyD: false,
+    KeyQ: false,
+    KeyE: false,
+    ShiftLeft: false,
+    ShiftRight: false,
+  };
+  const RAD_TO_DEG = 180 / Math.PI;
+  const DEG_TO_RAD = Math.PI / 180;
+  const DEFAULT_CAMERA_DEBUG = {
+    useLookAt: true,
+    position: { x: 50.1, y: 53.9, z: 0 },
+    rotationDeg: {
+      x: -90.00000000000003,
+      y: 42.13759477388825,
+      z: 90.00000000000003,
+    },
+    target: { x: 0.7, y: -0.7, z: 0 },
+    fov: 15,
+    near: 0.1,
+    far: 100.1,
+    zoom: 1.18,
+    focus: 9.8,
+    filmGauge: 0,
+    filmOffset: 0,
+  };
+  const cameraDebugState = JSON.parse(JSON.stringify(DEFAULT_CAMERA_DEBUG));
+
+  function toFiniteNumber(value, fallback) {
+    const next = Number(value);
+    return Number.isFinite(next) ? next : fallback;
+  }
+
+  function exportCameraDebugState() {
+    return {
+      useLookAt: Boolean(cameraDebugState.useLookAt),
+      position: {
+        x: toFiniteNumber(cameraDebugState.position.x, DEFAULT_CAMERA_DEBUG.position.x),
+        y: toFiniteNumber(cameraDebugState.position.y, DEFAULT_CAMERA_DEBUG.position.y),
+        z: toFiniteNumber(cameraDebugState.position.z, DEFAULT_CAMERA_DEBUG.position.z),
+      },
+      rotationDeg: {
+        x: toFiniteNumber(cameraDebugState.rotationDeg.x, DEFAULT_CAMERA_DEBUG.rotationDeg.x),
+        y: toFiniteNumber(cameraDebugState.rotationDeg.y, DEFAULT_CAMERA_DEBUG.rotationDeg.y),
+        z: toFiniteNumber(cameraDebugState.rotationDeg.z, DEFAULT_CAMERA_DEBUG.rotationDeg.z),
+      },
+      target: {
+        x: toFiniteNumber(cameraDebugState.target.x, DEFAULT_CAMERA_DEBUG.target.x),
+        y: toFiniteNumber(cameraDebugState.target.y, DEFAULT_CAMERA_DEBUG.target.y),
+        z: toFiniteNumber(cameraDebugState.target.z, DEFAULT_CAMERA_DEBUG.target.z),
+      },
+      fov: toFiniteNumber(cameraDebugState.fov, DEFAULT_CAMERA_DEBUG.fov),
+      near: toFiniteNumber(cameraDebugState.near, DEFAULT_CAMERA_DEBUG.near),
+      far: toFiniteNumber(cameraDebugState.far, DEFAULT_CAMERA_DEBUG.far),
+      zoom: toFiniteNumber(cameraDebugState.zoom, DEFAULT_CAMERA_DEBUG.zoom),
+      focus: toFiniteNumber(cameraDebugState.focus, DEFAULT_CAMERA_DEBUG.focus),
+      filmGauge: toFiniteNumber(cameraDebugState.filmGauge, DEFAULT_CAMERA_DEBUG.filmGauge),
+      filmOffset: toFiniteNumber(cameraDebugState.filmOffset, DEFAULT_CAMERA_DEBUG.filmOffset),
+    };
+  }
+
+  function applyCameraDebugState() {
+    camera.position.set(
+      toFiniteNumber(cameraDebugState.position.x, DEFAULT_CAMERA_DEBUG.position.x),
+      toFiniteNumber(cameraDebugState.position.y, DEFAULT_CAMERA_DEBUG.position.y),
+      toFiniteNumber(cameraDebugState.position.z, DEFAULT_CAMERA_DEBUG.position.z),
+    );
+    if (cameraDebugState.useLookAt) {
+      camera.lookAt(
+        toFiniteNumber(cameraDebugState.target.x, DEFAULT_CAMERA_DEBUG.target.x),
+        toFiniteNumber(cameraDebugState.target.y, DEFAULT_CAMERA_DEBUG.target.y),
+        toFiniteNumber(cameraDebugState.target.z, DEFAULT_CAMERA_DEBUG.target.z),
+      );
+      cameraDebugState.rotationDeg.x = camera.rotation.x * RAD_TO_DEG;
+      cameraDebugState.rotationDeg.y = camera.rotation.y * RAD_TO_DEG;
+      cameraDebugState.rotationDeg.z = camera.rotation.z * RAD_TO_DEG;
+    } else {
+      camera.rotation.set(
+        toFiniteNumber(cameraDebugState.rotationDeg.x, DEFAULT_CAMERA_DEBUG.rotationDeg.x) * DEG_TO_RAD,
+        toFiniteNumber(cameraDebugState.rotationDeg.y, DEFAULT_CAMERA_DEBUG.rotationDeg.y) * DEG_TO_RAD,
+        toFiniteNumber(cameraDebugState.rotationDeg.z, DEFAULT_CAMERA_DEBUG.rotationDeg.z) * DEG_TO_RAD,
+      );
+    }
+    camera.fov = THREE.MathUtils.clamp(toFiniteNumber(cameraDebugState.fov, DEFAULT_CAMERA_DEBUG.fov), 1, 179);
+    camera.near = Math.max(0.01, toFiniteNumber(cameraDebugState.near, DEFAULT_CAMERA_DEBUG.near));
+    camera.far = Math.max(camera.near + 0.01, toFiniteNumber(cameraDebugState.far, DEFAULT_CAMERA_DEBUG.far));
+    camera.zoom = Math.max(0.01, toFiniteNumber(cameraDebugState.zoom, DEFAULT_CAMERA_DEBUG.zoom));
+    camera.focus = Math.max(0.01, toFiniteNumber(cameraDebugState.focus, DEFAULT_CAMERA_DEBUG.focus));
+    camera.filmGauge = Math.max(1, toFiniteNumber(cameraDebugState.filmGauge, DEFAULT_CAMERA_DEBUG.filmGauge));
+    camera.filmOffset = toFiniteNumber(cameraDebugState.filmOffset, DEFAULT_CAMERA_DEBUG.filmOffset);
+    camera.updateProjectionMatrix();
+  }
+
+  function normalizeCameraSettings(raw) {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+    const source = {
+      ...DEFAULT_CAMERA_DEBUG,
+      ...raw,
+      position: { ...DEFAULT_CAMERA_DEBUG.position, ...(raw.position || {}) },
+      rotationDeg: { ...DEFAULT_CAMERA_DEBUG.rotationDeg, ...(raw.rotationDeg || {}) },
+      target: { ...DEFAULT_CAMERA_DEBUG.target, ...(raw.target || {}) },
+    };
+    return {
+      useLookAt: Boolean(source.useLookAt),
+      position: {
+        x: toFiniteNumber(source.position.x, DEFAULT_CAMERA_DEBUG.position.x),
+        y: toFiniteNumber(source.position.y, DEFAULT_CAMERA_DEBUG.position.y),
+        z: toFiniteNumber(source.position.z, DEFAULT_CAMERA_DEBUG.position.z),
+      },
+      rotationDeg: {
+        x: toFiniteNumber(source.rotationDeg.x, DEFAULT_CAMERA_DEBUG.rotationDeg.x),
+        y: toFiniteNumber(source.rotationDeg.y, DEFAULT_CAMERA_DEBUG.rotationDeg.y),
+        z: toFiniteNumber(source.rotationDeg.z, DEFAULT_CAMERA_DEBUG.rotationDeg.z),
+      },
+      target: {
+        x: toFiniteNumber(source.target.x, DEFAULT_CAMERA_DEBUG.target.x),
+        y: toFiniteNumber(source.target.y, DEFAULT_CAMERA_DEBUG.target.y),
+        z: toFiniteNumber(source.target.z, DEFAULT_CAMERA_DEBUG.target.z),
+      },
+      fov: toFiniteNumber(source.fov, DEFAULT_CAMERA_DEBUG.fov),
+      near: toFiniteNumber(source.near, DEFAULT_CAMERA_DEBUG.near),
+      far: toFiniteNumber(source.far, DEFAULT_CAMERA_DEBUG.far),
+      zoom: toFiniteNumber(source.zoom, DEFAULT_CAMERA_DEBUG.zoom),
+      focus: toFiniteNumber(source.focus, DEFAULT_CAMERA_DEBUG.focus),
+      filmGauge: toFiniteNumber(source.filmGauge, DEFAULT_CAMERA_DEBUG.filmGauge),
+      filmOffset: toFiniteNumber(source.filmOffset, DEFAULT_CAMERA_DEBUG.filmOffset),
+    };
+  }
+
+  function isTextInputFocused() {
+    const active = document.activeElement;
+    if (!active) {
+      return false;
+    }
+    const tag = String(active.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || active.isContentEditable;
+  }
+
+  function setFlyMoveKey(code, pressed) {
+    if (!(code in flyMoveState)) {
+      return false;
+    }
+    flyMoveState[code] = pressed;
+    return true;
+  }
+
+  function clearFlyMoveState() {
+    for (const code of Object.keys(flyMoveState)) {
+      flyMoveState[code] = false;
+    }
+  }
+
+  function syncFlyAnglesFromCamera() {
+    flyPitchDeg = camera.rotation.x * RAD_TO_DEG;
+    flyYawDeg = camera.rotation.y * RAD_TO_DEG;
+  }
+
+  function syncCameraDebugFromCameraObject() {
+    cameraDebugState.useLookAt = false;
+    cameraDebugState.position.x = camera.position.x;
+    cameraDebugState.position.y = camera.position.y;
+    cameraDebugState.position.z = camera.position.z;
+    cameraDebugState.rotationDeg.x = camera.rotation.x * RAD_TO_DEG;
+    cameraDebugState.rotationDeg.y = camera.rotation.y * RAD_TO_DEG;
+    cameraDebugState.rotationDeg.z = camera.rotation.z * RAD_TO_DEG;
+  }
+
+  function setFlyCamEnabled(enabled) {
+    const next = Boolean(enabled);
+    if (next === flyCamEnabled) {
+      return;
+    }
+    flyCamEnabled = next;
+    if (flyCamEnabled) {
+      flyCamRestoreState = exportCameraDebugState();
+      camera.rotation.order = 'YXZ';
+      syncFlyAnglesFromCamera();
+      clearFlyMoveState();
+      return;
+    }
+    flyLookActive = false;
+    clearFlyMoveState();
+    if (!flyCamRestoreState) {
+      return;
+    }
+    Object.assign(cameraDebugState, normalizeCameraSettings(flyCamRestoreState));
+    applyCameraDebugState();
+    if (typeof syncCameraInputsFromState === 'function') {
+      syncCameraInputsFromState();
+    }
+    saveSceneLayout();
+  }
+
+  function updateFlyCamera(dt) {
+    if (!flyCamEnabled) {
+      return;
+    }
+    const up = Number(flyMoveState.KeyE) - Number(flyMoveState.KeyQ);
+    const forward = Number(flyMoveState.KeyW) - Number(flyMoveState.KeyS);
+    const right = Number(flyMoveState.KeyD) - Number(flyMoveState.KeyA);
+    if (up === 0 && forward === 0 && right === 0) {
+      return;
+    }
+    const speedMultiplier = flyMoveState.ShiftLeft || flyMoveState.ShiftRight ? 2.4 : 1;
+    const speed = 11 * speedMultiplier;
+    const delta = speed * dt;
+    const forwardDir = new THREE.Vector3();
+    camera.getWorldDirection(forwardDir);
+    const rightDir = new THREE.Vector3().crossVectors(forwardDir, camera.up).normalize();
+    camera.position.addScaledVector(forwardDir, forward * delta);
+    camera.position.addScaledVector(rightDir, right * delta);
+    camera.position.addScaledVector(camera.up, up * delta);
+    syncCameraDebugFromCameraObject();
+    if (typeof syncCameraInputsFromState === 'function') {
+      syncCameraInputsFromState();
+    }
+  }
 
   function applyUiVisibility() {
     debugEditor.style.display = uiHidden ? 'none' : '';
@@ -2422,6 +2723,7 @@
         minecart: {
           speed: minecart.getSpeed(),
         },
+        camera: exportCameraDebugState(),
       };
       localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(snapshot));
     } catch (error) {
@@ -2508,6 +2810,7 @@
         const blocks = normalizeBlocks(parsed && parsed.blocks);
         const rails = normalizeRails(parsed && parsed.rails);
         const speed = Number(parsed && parsed.minecart && parsed.minecart.speed);
+        const cameraSettings = normalizeCameraSettings(parsed && parsed.camera);
 
         const sceneData = {
           blocks: blocks.length > 0 ? blocks : DEFAULT_EDITOR_LEVEL.blocks,
@@ -2519,6 +2822,10 @@
         trackController.setRailLayout(railEditor.exportData());
         if (Number.isFinite(speed) && speed > 0) {
           minecart.setSpeed(speed);
+        }
+        if (cameraSettings) {
+          Object.assign(cameraDebugState, cameraSettings);
+          applyCameraDebugState();
         }
         return true;
       }
@@ -2601,8 +2908,13 @@
     refreshUiLockState();
   }
 
+  function getLevelCountsByType() {
+    return buildManager.getSlotTypeCounts();
+  }
+
   const worldInventory = new WorldInventoryController(scene, BLOCK_CONFIGS);
   const blocks = new Map();
+  const initialCountsByType = getLevelCountsByType();
 
   for (const config of BLOCK_CONFIGS) {
     const controller = new BlockController({
@@ -2612,7 +2924,7 @@
       id: config.id,
       type: config.type,
       color: config.color,
-      count: config.count,
+      count: initialCountsByType[config.type] || 0,
       onCountChange: handleCountChange,
       onCycleFinish: handleCycleFinish,
     });
@@ -2623,6 +2935,13 @@
     }
     worldInventory.registerCarrierMesh(config.id, controller.mesh);
     blocks.set(config.id, controller);
+  }
+
+  function syncBlockCountsFromLevel() {
+    const countsByType = getLevelCountsByType();
+    for (const controller of blocks.values()) {
+      controller.setCount(countsByType[controller.type] || 0);
+    }
   }
 
   function refreshUiLockState() {
@@ -2648,6 +2967,73 @@
     const railAutoBtn = document.getElementById('rail-auto');
     const exportBtn = document.getElementById('editor-export');
     const applyBtn = document.getElementById('editor-apply');
+    const cameraFlyEnabledInput = document.getElementById('cam-fly-enabled');
+    const cameraLookAtEnabledInput = document.getElementById('cam-lookat-enabled');
+    const cameraPosXInput = document.getElementById('cam-pos-x');
+    const cameraPosYInput = document.getElementById('cam-pos-y');
+    const cameraPosZInput = document.getElementById('cam-pos-z');
+    const cameraRotXInput = document.getElementById('cam-rot-x');
+    const cameraRotYInput = document.getElementById('cam-rot-y');
+    const cameraRotZInput = document.getElementById('cam-rot-z');
+    const cameraTargetXInput = document.getElementById('cam-target-x');
+    const cameraTargetYInput = document.getElementById('cam-target-y');
+    const cameraTargetZInput = document.getElementById('cam-target-z');
+    const cameraFovInput = document.getElementById('cam-fov');
+    const cameraNearInput = document.getElementById('cam-near');
+    const cameraFarInput = document.getElementById('cam-far');
+    const cameraZoomInput = document.getElementById('cam-zoom');
+    const cameraFocusInput = document.getElementById('cam-focus');
+    const cameraFilmGaugeInput = document.getElementById('cam-film-gauge');
+    const cameraFilmOffsetInput = document.getElementById('cam-film-offset');
+    const cameraResetBtn = document.getElementById('cam-reset');
+    const cameraCopyBtn = document.getElementById('cam-copy');
+
+    function setCameraInputsFromState() {
+      cameraFlyEnabledInput.checked = flyCamEnabled;
+      cameraLookAtEnabledInput.checked = Boolean(cameraDebugState.useLookAt);
+      cameraPosXInput.value = cameraDebugState.position.x.toFixed(3);
+      cameraPosYInput.value = cameraDebugState.position.y.toFixed(3);
+      cameraPosZInput.value = cameraDebugState.position.z.toFixed(3);
+      cameraRotXInput.value = cameraDebugState.rotationDeg.x.toFixed(3);
+      cameraRotYInput.value = cameraDebugState.rotationDeg.y.toFixed(3);
+      cameraRotZInput.value = cameraDebugState.rotationDeg.z.toFixed(3);
+      cameraTargetXInput.value = cameraDebugState.target.x.toFixed(3);
+      cameraTargetYInput.value = cameraDebugState.target.y.toFixed(3);
+      cameraTargetZInput.value = cameraDebugState.target.z.toFixed(3);
+      cameraFovInput.value = cameraDebugState.fov.toFixed(3);
+      cameraNearInput.value = cameraDebugState.near.toFixed(3);
+      cameraFarInput.value = cameraDebugState.far.toFixed(3);
+      cameraZoomInput.value = cameraDebugState.zoom.toFixed(3);
+      cameraFocusInput.value = cameraDebugState.focus.toFixed(3);
+      cameraFilmGaugeInput.value = cameraDebugState.filmGauge.toFixed(3);
+      cameraFilmOffsetInput.value = cameraDebugState.filmOffset.toFixed(3);
+    }
+
+    function commitCameraFromInputs() {
+      if (flyCamEnabled) {
+        return;
+      }
+      cameraDebugState.useLookAt = Boolean(cameraLookAtEnabledInput.checked);
+      cameraDebugState.position.x = toFiniteNumber(cameraPosXInput.value, cameraDebugState.position.x);
+      cameraDebugState.position.y = toFiniteNumber(cameraPosYInput.value, cameraDebugState.position.y);
+      cameraDebugState.position.z = toFiniteNumber(cameraPosZInput.value, cameraDebugState.position.z);
+      cameraDebugState.rotationDeg.x = toFiniteNumber(cameraRotXInput.value, cameraDebugState.rotationDeg.x);
+      cameraDebugState.rotationDeg.y = toFiniteNumber(cameraRotYInput.value, cameraDebugState.rotationDeg.y);
+      cameraDebugState.rotationDeg.z = toFiniteNumber(cameraRotZInput.value, cameraDebugState.rotationDeg.z);
+      cameraDebugState.target.x = toFiniteNumber(cameraTargetXInput.value, cameraDebugState.target.x);
+      cameraDebugState.target.y = toFiniteNumber(cameraTargetYInput.value, cameraDebugState.target.y);
+      cameraDebugState.target.z = toFiniteNumber(cameraTargetZInput.value, cameraDebugState.target.z);
+      cameraDebugState.fov = toFiniteNumber(cameraFovInput.value, cameraDebugState.fov);
+      cameraDebugState.near = toFiniteNumber(cameraNearInput.value, cameraDebugState.near);
+      cameraDebugState.far = toFiniteNumber(cameraFarInput.value, cameraDebugState.far);
+      cameraDebugState.zoom = toFiniteNumber(cameraZoomInput.value, cameraDebugState.zoom);
+      cameraDebugState.focus = toFiniteNumber(cameraFocusInput.value, cameraDebugState.focus);
+      cameraDebugState.filmGauge = toFiniteNumber(cameraFilmGaugeInput.value, cameraDebugState.filmGauge);
+      cameraDebugState.filmOffset = toFiniteNumber(cameraFilmOffsetInput.value, cameraDebugState.filmOffset);
+      applyCameraDebugState();
+      setCameraInputsFromState();
+      saveSceneLayout();
+    }
 
     enabledInput.addEventListener('change', () => {
       editor.setEnabled(enabledInput.checked);
@@ -2711,7 +3097,50 @@
         rails: railEditor.exportData(),
       };
       buildManager.loadFromLevel(data);
+      syncBlockCountsFromLevel();
+      refreshUiLockState();
       saveSceneLayout();
+    });
+    cameraFlyEnabledInput.addEventListener('change', () => {
+      setFlyCamEnabled(cameraFlyEnabledInput.checked);
+      setCameraInputsFromState();
+    });
+    for (const input of [
+      cameraLookAtEnabledInput,
+      cameraPosXInput,
+      cameraPosYInput,
+      cameraPosZInput,
+      cameraRotXInput,
+      cameraRotYInput,
+      cameraRotZInput,
+      cameraTargetXInput,
+      cameraTargetYInput,
+      cameraTargetZInput,
+      cameraFovInput,
+      cameraNearInput,
+      cameraFarInput,
+      cameraZoomInput,
+      cameraFocusInput,
+      cameraFilmGaugeInput,
+      cameraFilmOffsetInput,
+    ]) {
+      input.addEventListener('input', commitCameraFromInputs);
+      input.addEventListener('change', commitCameraFromInputs);
+    }
+    cameraResetBtn.addEventListener('click', () => {
+      Object.assign(cameraDebugState, JSON.parse(JSON.stringify(DEFAULT_CAMERA_DEBUG)));
+      applyCameraDebugState();
+      setCameraInputsFromState();
+      saveSceneLayout();
+    });
+    cameraCopyBtn.addEventListener('click', async () => {
+      const text = JSON.stringify(exportCameraDebugState(), null, 2);
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (error) {
+        console.warn('Clipboard write failed, showing camera JSON in prompt', error);
+      }
+      window.prompt('Camera JSON', text);
     });
 
     editor.setType(blockSelect.value);
@@ -2719,6 +3148,8 @@
     railEditor.setType(railTypeSelect.value);
     railEditor.setRotationDeg(Number(railRotSelect.value));
     minecartSpeedInput.value = String(minecart.getSpeed());
+    syncCameraInputsFromState = setCameraInputsFromState;
+    setCameraInputsFromState();
   }
 
   function tryInventoryClick(event) {
@@ -2731,6 +3162,7 @@
   }
 
   function step(dt) {
+    updateFlyCamera(dt);
     minecart.update(dt);
     for (const controller of blocks.values()) {
       controller.update(dt);
@@ -2759,6 +3191,7 @@
         built: buildManager.getBuiltCount(),
         total: buildManager.getTotalCount(),
       },
+      camera: exportCameraDebugState(),
     };
     return JSON.stringify(payload);
   };
@@ -2777,6 +3210,20 @@
   });
 
   canvas.addEventListener('pointermove', (event) => {
+    if (flyCamEnabled && flyLookActive) {
+      const sensitivity = 0.18;
+      flyYawDeg -= event.movementX * sensitivity;
+      flyPitchDeg -= event.movementY * sensitivity;
+      flyPitchDeg = THREE.MathUtils.clamp(flyPitchDeg, -89, 89);
+      camera.rotation.order = 'YXZ';
+      camera.rotation.set(flyPitchDeg * DEG_TO_RAD, flyYawDeg * DEG_TO_RAD, 0);
+      syncCameraDebugFromCameraObject();
+      if (typeof syncCameraInputsFromState === 'function') {
+        syncCameraInputsFromState();
+      }
+      saveSceneLayout();
+      return;
+    }
     editor.updateHoverFromPointer(event);
     if (editor.isEnabled() && event.buttons === 1 && editor.selectedType === 'erase') {
       editor.placeAtHover();
@@ -2785,6 +3232,11 @@
   });
 
   canvas.addEventListener('pointerdown', (event) => {
+    if (flyCamEnabled && event.button === 2) {
+      flyLookActive = true;
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
     if (railEditor.isEnabled()) {
       if (event.button === 0) {
         railEditor.placeAtEvent(event);
@@ -2806,12 +3258,24 @@
     saveSceneLayout();
   });
   canvas.addEventListener('contextmenu', (event) => {
-    if (railEditor.isEnabled()) {
+    if (railEditor.isEnabled() || flyCamEnabled) {
       event.preventDefault();
+    }
+  });
+  canvas.addEventListener('pointerup', (event) => {
+    if (event.button === 2) {
+      flyLookActive = false;
+      if (canvas.hasPointerCapture(event.pointerId)) {
+        canvas.releasePointerCapture(event.pointerId);
+      }
     }
   });
 
   window.addEventListener('keydown', (event) => {
+    if (flyCamEnabled && !isTextInputFocused() && setFlyMoveKey(event.code, true)) {
+      event.preventDefault();
+      return;
+    }
     if (event.code !== 'Space' || event.repeat) {
       return;
     }
@@ -2820,9 +3284,17 @@
     applyUiVisibility();
   });
   window.addEventListener('keyup', (event) => {
+    if (flyCamEnabled && setFlyMoveKey(event.code, false)) {
+      event.preventDefault();
+      return;
+    }
     if (event.code === 'Space') {
       event.preventDefault();
     }
+  });
+  window.addEventListener('blur', () => {
+    flyLookActive = false;
+    clearFlyMoveState();
   });
 
   refreshUiLockState();
