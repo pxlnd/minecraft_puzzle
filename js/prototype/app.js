@@ -34,12 +34,6 @@
     return texture;
   }
 
-  const BLOCK_TEXTURES = {
-    stone: loadTexture(TEXTURE_DATA.stone || './assets/block/minecraft_stone.png', { pixelated: true }),
-    wood: loadTexture(TEXTURE_DATA.wood || './assets/block/wood.webp', { pixelated: true }),
-    grass: loadTexture(TEXTURE_DATA.grass || './assets/grass.png', { pixelated: true }),
-  };
-
   function pixelHash(x, y, seed = 0) {
     const n = Math.sin((x + seed * 0.17) * 12.9898 + (y - seed * 0.11) * 78.233) * 43758.5453;
     return n - Math.floor(n);
@@ -71,6 +65,175 @@
         ctx.fillStyle = palette[idx];
         ctx.fillRect(x, y, 1, 1);
       }
+    }
+  }
+
+  const BLOCK_TEXTURES = {
+    stone: loadTexture(TEXTURE_DATA.stone || './assets/block/minecraft_stone.png', { pixelated: true }),
+    wood: loadTexture(TEXTURE_DATA.wood || './assets/block/wood.webp', { pixelated: true }),
+    grass: loadTexture(TEXTURE_DATA.grass || './assets/grass.png', { pixelated: true }),
+    door: loadTexture(TEXTURE_DATA.door || './assets/block/minecraft_oak_door_item.png', { pixelated: true }),
+  };
+  const DOOR_MODEL_PATH = './assets/minecraft_door.glb';
+  const ENABLE_DOOR_GLB = false;
+  const DOOR_MODEL_STATE = {
+    template: null,
+    unitHeight: 1,
+    loading: false,
+    failed: false,
+  };
+
+  function disposeObject3D(root) {
+    if (!root) {
+      return;
+    }
+    root.traverse((node) => {
+      if (!node.isMesh) {
+        return;
+      }
+      if (node.geometry) {
+        node.geometry.dispose();
+      }
+      if (Array.isArray(node.material)) {
+        for (const material of node.material) {
+          if (material && typeof material.dispose === 'function') {
+            material.dispose();
+          }
+        }
+      } else if (node.material && typeof node.material.dispose === 'function') {
+        node.material.dispose();
+      }
+    });
+  }
+
+  function ensureDoorModelLoading() {
+    if (DOOR_MODEL_STATE.template || DOOR_MODEL_STATE.loading || DOOR_MODEL_STATE.failed) {
+      return;
+    }
+    if (!THREE.GLTFLoader) {
+      DOOR_MODEL_STATE.failed = true;
+      console.warn('GLTFLoader is unavailable; fallback door panel is used.');
+      return;
+    }
+
+    DOOR_MODEL_STATE.loading = true;
+    const loader = new THREE.GLTFLoader();
+    loader.load(
+      DOOR_MODEL_PATH,
+      (gltf) => {
+        DOOR_MODEL_STATE.loading = false;
+        const root = gltf && (gltf.scene || (Array.isArray(gltf.scenes) ? gltf.scenes[0] : null));
+        if (!root) {
+          DOOR_MODEL_STATE.failed = true;
+          console.warn('Door model loaded but scene root is missing.');
+          return;
+        }
+
+        const template = root.clone(true);
+        template.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(template);
+        if (box.isEmpty()) {
+          DOOR_MODEL_STATE.failed = true;
+          console.warn('Door model has empty bounds.');
+          return;
+        }
+
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z, 1e-6);
+        template.position.sub(center);
+        template.scale.setScalar(1 / maxDim);
+        template.updateMatrixWorld(true);
+
+        const normalizedBox = new THREE.Box3().setFromObject(template);
+        DOOR_MODEL_STATE.unitHeight = Math.max(1e-6, normalizedBox.max.y - normalizedBox.min.y);
+        template.position.y += -0.5 - normalizedBox.min.y;
+        template.updateMatrixWorld(true);
+
+        template.traverse((node) => {
+          if (node.isMesh) {
+            node.castShadow = true;
+            node.receiveShadow = true;
+          }
+        });
+
+        DOOR_MODEL_STATE.template = template;
+      },
+      undefined,
+      (error) => {
+        DOOR_MODEL_STATE.loading = false;
+        DOOR_MODEL_STATE.failed = true;
+        console.warn('Failed to load door GLB. Fallback door panel is used.', error);
+      },
+    );
+  }
+
+  function createDoorModelMesh(size, variant = 'placed') {
+    if (!ENABLE_DOOR_GLB) {
+      return null;
+    }
+    ensureDoorModelLoading();
+    if (!DOOR_MODEL_STATE.template) {
+      return null;
+    }
+
+    const targetHeight = variant === 'piece'
+      ? size
+      : (variant === 'carrier' ? size * 0.92 : size * 0.98);
+    const scale = targetHeight / Math.max(1e-6, DOOR_MODEL_STATE.unitHeight);
+
+    const clone = DOOR_MODEL_STATE.template.clone(true);
+    clone.scale.multiplyScalar(scale);
+    clone.rotation.y = Math.PI * 0.5;
+    return clone;
+  }
+
+  function createDoorPanelGeometry(width, height, thickness = 0.1) {
+    return new THREE.BoxGeometry(
+      Math.max(0.02, thickness),
+      Math.max(0.02, height),
+      Math.max(0.02, width),
+    );
+  }
+
+  function createBlockMesh(type, size, material, variant = 'placed') {
+    if (type === 'door') {
+      const modelMesh = createDoorModelMesh(size, variant);
+      if (modelMesh) {
+        return modelMesh;
+      }
+      let mesh;
+      if (variant === 'piece') {
+        mesh = new THREE.Mesh(createDoorPanelGeometry(size * 0.58, size, size * 0.12), material);
+      } else if (variant === 'carrier') {
+        mesh = new THREE.Mesh(createDoorPanelGeometry(size * 0.62, size * 0.92, size * 0.14), material);
+      } else {
+        mesh = new THREE.Mesh(createDoorPanelGeometry(size * 0.68, size * 0.98, size * 0.16), material);
+      }
+      return mesh;
+    }
+
+    if (variant === 'piece') {
+      return new THREE.Mesh(PIECE_GEOMETRY, material);
+    }
+    if (variant === 'carrier') {
+      return new THREE.Mesh(CARRIER_GEOMETRY, material);
+    }
+    return new THREE.Mesh(new THREE.BoxGeometry(size, size, size), material);
+  }
+
+  function attachCellUserData(root, cell) {
+    if (!root || !cell) {
+      return;
+    }
+    const payload = { x: cell.x, y: cell.y, z: cell.z };
+    root.userData.cell = payload;
+    if (typeof root.traverse === 'function') {
+      root.traverse((node) => {
+        if (node && node.userData) {
+          node.userData.cell = payload;
+        }
+      });
     }
   }
 
@@ -1151,14 +1314,12 @@
     loadFromLevel(data) {
       for (const mesh of this.builtMeshes) {
         this.scene.remove(mesh);
-        mesh.geometry.dispose();
-        mesh.material.dispose();
+        disposeObject3D(mesh);
       }
       this.builtMeshes = [];
       if (this.shadowPlane) {
         this.scene.remove(this.shadowPlane);
-        this.shadowPlane.geometry.dispose();
-        this.shadowPlane.material.dispose();
+        disposeObject3D(this.shadowPlane);
         this.shadowPlane = null;
       }
       this.slots = [];
@@ -1309,9 +1470,11 @@
 
       slot.state = 'built';
 
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(this.cellSize, this.cellSize, this.cellSize),
+      const mesh = createBlockMesh(
+        slot.type,
+        this.cellSize,
         this.createMaterial(slot.type, 0xffffff),
+        'placed',
       );
       mesh.position.copy(slot.position);
       mesh.castShadow = true;
@@ -1493,50 +1656,26 @@
 
       const layout = slotConfigs.filter((config) => !config.empty);
       const spacing = 2.55;
-      const startX = -((layout.length - 1) * spacing) * 0.5;
-      const baseZ = 7.7;
+      const startZ = -((layout.length - 1) * spacing) * 0.5;
+      const baseX = 9.8;
 
       for (let i = 0; i < layout.length; i += 1) {
         const config = layout[i];
-        const slotX = startX + i * spacing;
-
-        const baseMaterial = new THREE.MeshStandardMaterial({
-          color: 0x8a5c39,
-          roughness: 0.88,
-          metalness: 0.05,
-          transparent: true,
-          opacity: 0.96,
-        });
-        const base = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.15, 1.55), baseMaterial);
-        base.position.set(slotX, 0.08, baseZ);
-        base.castShadow = true;
-        base.receiveShadow = true;
-        base.userData.blockId = config.id;
-        this.group.add(base);
-
-        const border = new THREE.LineSegments(
-          new THREE.EdgesGeometry(new THREE.BoxGeometry(1.62, 0.18, 1.62)),
-          new THREE.LineBasicMaterial({ color: 0x4f2f1d, transparent: true, opacity: 0.9 }),
-        );
-        border.position.copy(base.position);
-        border.userData.blockId = config.id;
-        this.group.add(border);
+        const slotZ = startZ + i * spacing;
 
         const clickPad = new THREE.Mesh(
           new THREE.BoxGeometry(1.8, 1, 1.8),
           new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
         );
-        clickPad.position.set(slotX, 0.5, baseZ);
+        clickPad.position.set(baseX, 0.5, slotZ);
         clickPad.userData.blockId = config.id;
         this.group.add(clickPad);
 
-        this.interactiveMeshes.push(base, border, clickPad);
+        this.interactiveMeshes.push(clickPad);
         this.slots.set(config.id, {
           id: config.id,
-          base,
-          border,
           clickPad,
-          anchor: new THREE.Vector3(slotX, 1.02, baseZ),
+          anchor: new THREE.Vector3(baseX, 1.02, slotZ),
           disabled: false,
           locked: false,
         });
@@ -1580,10 +1719,7 @@
 
     applySlotState(slot) {
       const blocked = slot.disabled || slot.locked;
-      slot.base.material.color.setHex(blocked ? 0x5f4a3a : 0x8a5c39);
-      slot.base.material.opacity = blocked ? 0.52 : 0.96;
-      slot.border.material.color.setHex(blocked ? 0x3c3129 : 0x4f2f1d);
-      slot.border.material.opacity = blocked ? 0.45 : 0.9;
+      slot.clickPad.userData.blocked = blocked;
     }
 
     pickBlockId(clientX, clientY, camera, canvas) {
@@ -1637,11 +1773,15 @@
 
   function createBlockMaterial(type, color) {
     const map = BLOCK_TEXTURES[type] || null;
+    const isDoor = type === 'door';
     return new THREE.MeshStandardMaterial({
       map,
       color: map ? 0xffffff : color,
-      roughness: type === 'wood' ? 0.9 : 0.78,
+      roughness: type === 'wood' || isDoor ? 0.9 : 0.78,
       metalness: type === 'stone' ? 0.12 : 0.04,
+      transparent: isDoor,
+      alphaTest: isDoor ? 0.08 : 0,
+      side: isDoor ? THREE.DoubleSide : THREE.FrontSide,
     });
   }
 
@@ -1677,15 +1817,22 @@
 
       this.projectiles = [];
 
-      this.mesh = new THREE.Mesh(CARRIER_GEOMETRY, createBlockMaterial(this.type, this.color));
+      this.mesh = createBlockMesh(
+        this.type,
+        1,
+        createBlockMaterial(this.type, this.color),
+        'carrier',
+      );
       this.mesh.castShadow = true;
       this.mesh.receiveShadow = true;
 
-      const edges = new THREE.LineSegments(
-        new THREE.EdgesGeometry(CARRIER_GEOMETRY),
-        new THREE.LineBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.42 }),
-      );
-      this.mesh.add(edges);
+      if (this.type !== 'door') {
+        const edges = new THREE.LineSegments(
+          new THREE.EdgesGeometry(CARRIER_GEOMETRY),
+          new THREE.LineBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.42 }),
+        );
+        this.mesh.add(edges);
+      }
 
       this.countCanvas = document.createElement('canvas');
       this.countCanvas.width = 256;
@@ -1871,9 +2018,11 @@
         this.onCountChange(this.id, this.count);
       }
 
-      const piece = new THREE.Mesh(
-        PIECE_GEOMETRY,
+      const piece = createBlockMesh(
+        this.type,
+        0.32,
         createBlockMaterial(this.type, this.color),
+        'piece',
       );
       piece.castShadow = true;
       piece.receiveShadow = true;
@@ -1899,8 +2048,7 @@
 
         if (projectile.progress >= 1) {
           this.scene.remove(projectile.mesh);
-          projectile.mesh.geometry.dispose();
-          projectile.mesh.material.dispose();
+          disposeObject3D(projectile.mesh);
           this.buildManager.commit(projectile.index);
           this.projectiles.splice(i, 1);
           continue;
@@ -2210,12 +2358,18 @@
 
     getHoveredBlockHit(event) {
       this.setRayFromPointer(event);
-      const hits = this.raycaster.intersectObjects(this.group.children, false);
+      const hits = this.raycaster.intersectObjects(this.group.children, true);
       for (const hit of hits) {
-        const data = hit.object && hit.object.userData && hit.object.userData.cell;
+        let probe = hit.object || null;
+        let data = null;
+        while (probe && !data) {
+          data = probe.userData && probe.userData.cell ? probe.userData.cell : null;
+          probe = data ? null : probe.parent;
+        }
         if (!data) {
           continue;
         }
+        hit.object.userData.cell = data;
         return hit;
       }
       return null;
@@ -2316,8 +2470,7 @@
         const existing = this.cells.get(key) || this.getTopBlockInColumn(x, z);
         if (existing) {
           this.group.remove(existing.mesh);
-          existing.mesh.geometry.dispose();
-          existing.mesh.material.dispose();
+          disposeObject3D(existing.mesh);
           this.cells.delete(this.getCellKey(existing.x, existing.y, existing.z));
         }
         return;
@@ -2333,16 +2486,17 @@
       const targetExisting = this.cells.get(targetKey);
       if (targetExisting) {
         this.group.remove(targetExisting.mesh);
-        targetExisting.mesh.geometry.dispose();
-        targetExisting.mesh.material.dispose();
+        disposeObject3D(targetExisting.mesh);
       }
 
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(this.boxSize, this.boxSize, this.boxSize),
+      const mesh = createBlockMesh(
+        this.selectedType,
+        this.boxSize,
         this.createMaterial(this.selectedType, 0xffffff),
+        'placed',
       );
       mesh.position.copy(this.cellToPosition(x, targetY, z));
-      mesh.userData.cell = { x, y: targetY, z };
+      attachCellUserData(mesh, { x, y: targetY, z });
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.group.add(mesh);
@@ -2357,16 +2511,17 @@
       const existing = this.cells.get(key);
       if (existing) {
         this.group.remove(existing.mesh);
-        existing.mesh.geometry.dispose();
-        existing.mesh.material.dispose();
+        disposeObject3D(existing.mesh);
       }
 
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(this.boxSize, this.boxSize, this.boxSize),
+      const mesh = createBlockMesh(
+        type,
+        this.boxSize,
         this.createMaterial(type, 0xffffff),
+        'placed',
       );
       mesh.position.copy(this.cellToPosition(x, y, z));
-      mesh.userData.cell = { x, y, z };
+      attachCellUserData(mesh, { x, y, z });
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.group.add(mesh);
@@ -2376,8 +2531,7 @@
     clear() {
       for (const entry of this.cells.values()) {
         this.group.remove(entry.mesh);
-        entry.mesh.geometry.dispose();
-        entry.mesh.material.dispose();
+        disposeObject3D(entry.mesh);
       }
       this.cells.clear();
     }
@@ -2402,6 +2556,7 @@
     { id: 'stone', label: 'Stone', type: 'stone', color: 0xa5a9af, count: 18 },
     { id: 'wood', label: 'Wood', type: 'wood', color: 0xc9a26d, count: 12 },
     { id: 'grass', label: 'Grass', type: 'grass', color: 0x8bbf67, count: 9 },
+    { id: 'door', label: 'Door', type: 'door', color: 0x8a6435, count: 6 },
   ];
 
   const canvas = document.getElementById('app');
@@ -2870,7 +3025,7 @@
     buildManager.loadFromLevel(DEFAULT_EDITOR_LEVEL);
     loadDefaultRails();
   }
-  minecart.snapToNearestPoint(new THREE.Vector3(0, trackController.pathY, 7.7));
+  minecart.snapToNearestPoint(new THREE.Vector3(9.8, trackController.pathY, 0));
 
   let activeBlockId = null;
 
