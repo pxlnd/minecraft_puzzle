@@ -2648,12 +2648,6 @@
       const blockHit = this.getHoveredBlockHit(event);
       if (blockHit) {
         const cell = blockHit.object.userData.cell;
-        if (this.selectedType === 'erase') {
-          this.hoverCell = { x: cell.x, y: cell.y, z: cell.z };
-          this.updateHoverMesh();
-          return;
-        }
-
         if (blockHit.face) {
           this._normalMatrix.getNormalMatrix(blockHit.object.matrixWorld);
           this._worldNormal.copy(blockHit.face.normal).applyMatrix3(this._normalMatrix).normalize();
@@ -2712,6 +2706,44 @@
       this.hoverMesh.position.copy(this.cellToPosition(this.hoverCell.x, this.hoverCell.y, this.hoverCell.z));
     }
 
+    removeAtEvent(event) {
+      if (!this.enabled || !this.contentVisible) {
+        return false;
+      }
+      const blockHit = this.getHoveredBlockHit(event);
+      if (blockHit) {
+        const cell = blockHit.object.userData.cell;
+        const key = this.getCellKey(cell.x, cell.y, cell.z);
+        const existing = this.cells.get(key);
+        if (!existing) {
+          return false;
+        }
+        this.group.remove(existing.mesh);
+        disposeObject3D(existing.mesh);
+        this.cells.delete(key);
+        this.notifyChange();
+        return true;
+      }
+
+      const world = this.intersectGround(event);
+      if (!world) {
+        return false;
+      }
+      const cell = this.worldToCell(world);
+      if (!cell) {
+        return false;
+      }
+      const existing = this.getTopBlockInColumn(cell.x, cell.z);
+      if (!existing) {
+        return false;
+      }
+      this.group.remove(existing.mesh);
+      disposeObject3D(existing.mesh);
+      this.cells.delete(this.getCellKey(existing.x, existing.y, existing.z));
+      this.notifyChange();
+      return true;
+    }
+
     placeAtHover() {
       if (!this.enabled || !this.hoverCell) {
         return;
@@ -2719,17 +2751,6 @@
 
       const { x, y, z } = this.hoverCell;
       const key = this.getCellKey(x, y, z);
-
-      if (this.selectedType === 'erase') {
-        const existing = this.cells.get(key) || this.getTopBlockInColumn(x, z);
-        if (existing) {
-          this.group.remove(existing.mesh);
-          disposeObject3D(existing.mesh);
-          this.cells.delete(this.getCellKey(existing.x, existing.y, existing.z));
-          this.notifyChange();
-        }
-        return;
-      }
 
       let targetY = y;
       const existing = this.cells.get(key);
@@ -3622,6 +3643,42 @@
     };
   }
 
+  function parseIncrementalLevelNumber(value) {
+    const text = String(value || '').trim().toLowerCase();
+    const match = text.match(/^(\d+)\s*(?:lvl|level|лвл)$/i);
+    if (!match) {
+      return null;
+    }
+    const n = Number(match[1]);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  function getNextIncrementalLevelName() {
+    let maxN = 0;
+    for (const level of LEVEL_CATALOG) {
+      if (!level) {
+        continue;
+      }
+      const fromName = parseIncrementalLevelNumber(level.name);
+      if (fromName && fromName > maxN) {
+        maxN = fromName;
+      }
+      const fromId = parseIncrementalLevelNumber(String(level.id || '').replace(/[_-]+/g, ' '));
+      if (fromId && fromId > maxN) {
+        maxN = fromId;
+      }
+    }
+    return `${maxN + 1} lvl`;
+  }
+
+  function levelNameFromFilename(filename) {
+    const base = String(filename || '').replace(/\.[^./\\]+$/, '').trim();
+    if (!base) {
+      return '';
+    }
+    return base.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
   function upsertRuntimeLevel(levelRaw) {
     const level = normalizeLevelPayload(levelRaw, `imported_level_${makeTimestampTag()}`);
     if (!level) {
@@ -3814,6 +3871,7 @@
     const enabledInput = document.getElementById('editor-enabled');
     const blockSelect = document.getElementById('editor-block');
     const levelSelect = document.getElementById('level-select');
+    const levelNameInput = document.getElementById('level-name');
     const levelLoadBtn = document.getElementById('level-load');
     const levelSaveFileBtn = document.getElementById('level-save-file');
     const levelOpenFileBtn = document.getElementById('level-open-file');
@@ -3858,10 +3916,6 @@
         option.textContent = blockDef.label || blockDef.id;
         blockSelect.appendChild(option);
       }
-      const eraseOption = document.createElement('option');
-      eraseOption.value = 'erase';
-      eraseOption.textContent = 'Erase';
-      blockSelect.appendChild(eraseOption);
     }
 
     function populateLevelSelect() {
@@ -3879,6 +3933,21 @@
         levelSelect.appendChild(option);
       }
       levelSelect.value = activeLevelId;
+    }
+
+    function getActiveLevelName() {
+      const current = LEVELS_BY_ID.get(activeLevelId);
+      if (current && current.name) {
+        return String(current.name);
+      }
+      return String(activeLevelId || '');
+    }
+
+    function syncLevelNameInput() {
+      if (!levelNameInput) {
+        return;
+      }
+      levelNameInput.value = getActiveLevelName();
     }
 
     function setCameraInputsFromState() {
@@ -3960,6 +4029,7 @@
       if (levelSelect) {
         levelSelect.value = activeLevelId;
       }
+      syncLevelNameInput();
     }
 
     function applySceneSnapshotToRuntime(snapshot, options) {
@@ -3996,20 +4066,53 @@
       if (levelSelect) {
         levelSelect.value = activeLevelId;
       }
+      syncLevelNameInput();
       return true;
     }
 
     function buildCurrentLevelPayload() {
-      const currentLevel = cloneLevelData(LEVELS_BY_ID.get(activeLevelId) || { id: activeLevelId, name: activeLevelId });
-      const baseId = toSlug(activeLevelId || 'new_level', 'new_level');
+      const typedName = levelNameInput ? String(levelNameInput.value || '').trim() : '';
+      const resolvedName = typedName || getNextIncrementalLevelName();
+      const baseId = toSlug(resolvedName, 'new_level');
       return {
         id: baseId,
-        name: currentLevel.name || baseId,
+        name: resolvedName,
         blocks: getEditorBlocksSnapshot(),
         rails: normalizeRails(railEditor.exportData()),
         minecart: { speed: minecart.getSpeed() },
         camera: exportCameraDebugState(),
       };
+    }
+
+    function commitLevelName() {
+      if (!levelNameInput) {
+        return;
+      }
+      const typedName = String(levelNameInput.value || '').trim();
+      if (!typedName) {
+        return;
+      }
+      const renamedId = toSlug(typedName, activeLevelId || 'level');
+      const payload = {
+        id: renamedId,
+        name: typedName,
+        blocks: getEditorBlocksSnapshot(),
+        rails: normalizeRails(railEditor.exportData()),
+        minecart: { speed: minecart.getSpeed() },
+        camera: exportCameraDebugState(),
+      };
+      const previousId = activeLevelId;
+      activeLevelId = payload.id;
+      if (previousId !== payload.id) {
+        LEVELS_BY_ID.delete(previousId);
+      }
+      upsertRuntimeLevel(payload);
+      populateLevelSelect();
+      if (levelSelect) {
+        levelSelect.value = activeLevelId;
+      }
+      syncLevelNameInput();
+      saveSceneLayout();
     }
 
     enabledInput.addEventListener('change', () => {
@@ -4025,18 +4128,34 @@
         loadSelectedLevel(levelSelect.value);
       });
     }
+    if (levelNameInput) {
+      levelNameInput.addEventListener('change', commitLevelName);
+      levelNameInput.addEventListener('blur', commitLevelName);
+    }
 
     if (levelSaveFileBtn) {
       levelSaveFileBtn.addEventListener('click', async () => {
         const payload = buildCurrentLevelPayload();
+        const previousId = activeLevelId;
+        activeLevelId = payload.id;
+        if (previousId !== payload.id) {
+          LEVELS_BY_ID.delete(previousId);
+        }
+        upsertRuntimeLevel(payload);
+        populateLevelSelect();
+        if (levelSelect) {
+          levelSelect.value = activeLevelId;
+        }
+        syncLevelNameInput();
         const moduleText = [
           '(function () {',
           `  window.registerMinecraftLevel(${JSON.stringify(payload, null, 2)});`,
           '})();',
         ].join('\n');
-        const baseName = toSlug(payload.id, 'level');
-        const filename = `${baseName}_${makeTimestampTag()}.js`;
+        const baseName = toSlug(payload.name, 'level');
+        const filename = `${baseName}.js`;
         await saveTextToFile(filename, moduleText, 'text/javascript;charset=utf-8', ['.js']);
+        saveSceneLayout();
       });
     }
 
@@ -4053,12 +4172,16 @@
         try {
           const raw = await file.text();
           const parsed = parseLevelFileData(raw);
-          const fallbackId = `imported_level_${makeTimestampTag()}`;
+          const filenameLevelName = levelNameFromFilename(file.name);
+          const fallbackName = filenameLevelName || getNextIncrementalLevelName();
+          const fallbackId = toSlug(fallbackName, `imported_level_${makeTimestampTag()}`);
           const normalized = normalizeLevelPayload(parsed, fallbackId);
           if (!normalized || normalized.blocks.length === 0) {
             window.alert('Level file is invalid or has no valid blocks.');
             return;
           }
+          normalized.id = fallbackId;
+          normalized.name = fallbackName;
           const upserted = upsertRuntimeLevel(normalized);
           if (!upserted) {
             window.alert('Failed to import level file.');
@@ -4201,6 +4324,7 @@
     if (levelSelect) {
       levelSelect.value = activeLevelId;
     }
+    syncLevelNameInput();
     blockSelect.value = blockSelect.value || DEFAULT_BLOCK_ID;
     editor.setType(blockSelect.value);
     editor.setLayer(Number(layerInput.value));
@@ -4291,9 +4415,10 @@
       return;
     }
     editor.updateHoverFromPointer(event);
-    if (editor.isEnabled() && event.buttons === 1 && editor.selectedType === 'erase') {
-      editor.placeAtHover();
-      saveSceneLayout();
+    if (editor.isEnabled() && event.buttons === 2) {
+      if (editor.removeAtEvent(event)) {
+        saveSceneLayout();
+      }
     }
   });
 
@@ -4311,6 +4436,12 @@
       }
       return;
     }
+    if (event.button === 2) {
+      if (editor.removeAtEvent(event)) {
+        saveSceneLayout();
+      }
+      return;
+    }
     if (event.button !== 0) {
       return;
     }
@@ -4324,7 +4455,7 @@
     saveSceneLayout();
   });
   canvas.addEventListener('contextmenu', (event) => {
-    if (railEditor.isEnabled() || flyCamEnabled) {
+    if (railEditor.isEnabled() || editor.isEnabled() || flyCamEnabled) {
       event.preventDefault();
     }
   });

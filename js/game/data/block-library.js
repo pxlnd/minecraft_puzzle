@@ -65,6 +65,15 @@
       inventory: true,
       color: 0xb88952,
     },
+    {
+      id: 'lantern',
+      label: 'Lantern',
+      shape: 'cube',
+      textureKey: 'wood',
+      fallbackTexture: './assets/block/wood.webp',
+      inventory: true,
+      color: 0xffc15c,
+    },
   ];
 
   const byId = {};
