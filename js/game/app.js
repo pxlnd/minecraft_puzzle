@@ -68,21 +68,134 @@
     }
   }
 
-  const BLOCK_TEXTURES = {
-    stone: loadTexture(TEXTURE_DATA.stone || './assets/block/minecraft_stone.png', { pixelated: true }),
-    wood: loadTexture(TEXTURE_DATA.wood || './assets/block/wood.webp', { pixelated: true }),
-    grass: loadTexture(TEXTURE_DATA.grass || './assets/grass.png', { pixelated: true }),
-    door: loadTexture(TEXTURE_DATA.door || './assets/block/minecraft_oak_door_item.png', { pixelated: true }),
+  function createFallbackBlocks() {
+    const blocks = [];
+    for (let z = -3; z <= 3; z += 1) {
+      for (let x = -5; x <= 5; x += 1) {
+        blocks.push({ type: 'stone', x, y: 0, z });
+      }
+    }
+    return blocks;
+  }
+
+  function createFallbackRails() {
+    return [
+      { type: 'straight', x: -1, z: 5, yaw: Math.PI * 0.5 },
+      { type: 'straight', x: 0, z: 5, yaw: Math.PI * 0.5 },
+      { type: 'straight', x: 1, z: 5, yaw: Math.PI * 0.5 },
+      { type: 'straight', x: 2, z: 5, yaw: Math.PI * 0.5 },
+      { type: 'straight', x: 3, z: 5, yaw: Math.PI * 0.5 },
+      { type: 'straight', x: 4, z: 5, yaw: Math.PI * 0.5 },
+      { type: 'straight', x: 5, z: 5, yaw: Math.PI * 0.5 },
+      { type: 'straight', x: 6, z: 5, yaw: Math.PI * 0.5 },
+      { type: 'straight', x: 7, z: 5, yaw: Math.PI * 1.5 },
+      { type: 'corner', x: 8, z: 5, yaw: 0 },
+    ];
+  }
+
+  const FALLBACK_BLOCK_LIBRARY = [
+    {
+      id: 'stone',
+      label: 'Stone',
+      shape: 'cube',
+      textureKey: 'stone',
+      fallbackTexture: './assets/block/minecraft_stone.png',
+      inventory: true,
+      color: 0xa5a9af,
+    },
+    {
+      id: 'wood',
+      label: 'Wood',
+      shape: 'cube',
+      textureKey: 'wood',
+      fallbackTexture: './assets/block/wood.webp',
+      inventory: true,
+      color: 0xc9a26d,
+    },
+    {
+      id: 'grass',
+      label: 'Grass',
+      shape: 'cube',
+      textureKey: 'grass',
+      fallbackTexture: './assets/grass.png',
+      inventory: true,
+      color: 0x8bbf67,
+    },
+    {
+      id: 'door',
+      label: 'Door',
+      shape: 'door',
+      textureKey: 'wood',
+      fallbackTexture: './assets/block/minecraft_oak_door_item.png',
+      doorTopTextureKey: 'wood',
+      doorBottomTextureKey: 'wood',
+      inventory: true,
+      color: 0x8a6435,
+    },
+  ];
+  const BLOCK_LIBRARY = Array.isArray(window.MC_BLOCK_LIBRARY) && window.MC_BLOCK_LIBRARY.length > 0
+    ? window.MC_BLOCK_LIBRARY
+    : FALLBACK_BLOCK_LIBRARY;
+  const DEFAULT_BLOCK_ID = BLOCK_LIBRARY[0] ? BLOCK_LIBRARY[0].id : 'stone';
+  const BLOCK_DEFS_BY_ID = {};
+  for (const blockDef of BLOCK_LIBRARY) {
+    if (blockDef && blockDef.id) {
+      BLOCK_DEFS_BY_ID[blockDef.id] = blockDef;
+    }
+  }
+  const INVENTORY_BLOCK_DEFS = BLOCK_LIBRARY.filter((blockDef) => blockDef.inventory !== false);
+
+  const FALLBACK_LEVEL_DEF = {
+    id: 'fallback_level',
+    name: 'Fallback Level',
+    blocks: createFallbackBlocks(),
+    rails: createFallbackRails(),
+    minecart: { speed: 11 },
   };
+  const LEVEL_CATALOG = Array.isArray(window.MC_LEVELS) && window.MC_LEVELS.length > 0
+    ? window.MC_LEVELS
+    : [FALLBACK_LEVEL_DEF];
+  const LEVELS_BY_ID = new Map();
+  for (const level of LEVEL_CATALOG) {
+    if (level && level.id) {
+      LEVELS_BY_ID.set(level.id, level);
+    }
+  }
+
+  function getBlockDefinition(type) {
+    return BLOCK_DEFS_BY_ID[type] || BLOCK_DEFS_BY_ID[DEFAULT_BLOCK_ID] || BLOCK_LIBRARY[0];
+  }
+
+  function resolveTexturePath(textureKey, fallbackPath) {
+    if (textureKey && typeof TEXTURE_DATA[textureKey] === 'string' && TEXTURE_DATA[textureKey]) {
+      return TEXTURE_DATA[textureKey];
+    }
+    if (window.location.protocol === 'file:') {
+      return '';
+    }
+    return fallbackPath || '';
+  }
+
+  const BLOCK_TEXTURES = {};
+  for (const blockDef of BLOCK_LIBRARY) {
+    const source = resolveTexturePath(blockDef.textureKey, blockDef.fallbackTexture);
+    BLOCK_TEXTURES[blockDef.id] = source ? loadTexture(source, { pixelated: true }) : null;
+  }
+  const doorBlockDef = getBlockDefinition('door');
+  const doorFallback = doorBlockDef ? doorBlockDef.fallbackTexture : './assets/block/minecraft_oak_door_item.png';
+  const doorTopPath = resolveTexturePath(
+    doorBlockDef ? doorBlockDef.doorTopTextureKey : 'doorTop',
+    './assets/oak_door_top.png',
+  ) || resolveTexturePath('door', doorFallback) || resolveTexturePath('wood', '');
+  const doorBottomPath = resolveTexturePath(
+    doorBlockDef ? doorBlockDef.doorBottomTextureKey : 'doorBottom',
+    './assets/oak_door_bottom.png',
+  ) || resolveTexturePath('door', doorFallback) || resolveTexturePath('wood', '');
   const DOOR_TEXTURES = {
-    top: loadTexture(
-      TEXTURE_DATA.doorTop || TEXTURE_DATA.door || './assets/oak_door_top.png',
-      { pixelated: true },
-    ),
-    bottom: loadTexture(
-      TEXTURE_DATA.doorBottom || TEXTURE_DATA.door || './assets/oak_door_bottom.png',
-      { pixelated: true },
-    ),
+    top: doorTopPath ? loadTexture(doorTopPath, { pixelated: true }) : (BLOCK_TEXTURES.wood || BLOCK_TEXTURES.stone),
+    bottom: doorBottomPath
+      ? loadTexture(doorBottomPath, { pixelated: true })
+      : (BLOCK_TEXTURES.wood || BLOCK_TEXTURES.stone),
   };
   const DOOR_MODEL_PATH = './assets/minecraft_door.glb';
   const ENABLE_DOOR_GLB = true;
@@ -223,8 +336,36 @@
     );
   }
 
+  function createStairsMesh(size, material, variant = 'placed') {
+    const full = variant === 'piece' ? size * 0.72 : size;
+    const group = new THREE.Group();
+    const lowerStep = new THREE.Mesh(
+      new THREE.BoxGeometry(full, full * 0.5, full),
+      material,
+    );
+    lowerStep.position.y = -full * 0.25;
+    const upperStep = new THREE.Mesh(
+      new THREE.BoxGeometry(full, full * 0.5, full * 0.5),
+      material,
+    );
+    upperStep.position.set(0, full * 0.25, full * 0.25);
+
+    group.add(lowerStep);
+    group.add(upperStep);
+    group.traverse((node) => {
+      if (node.isMesh) {
+        node.castShadow = true;
+        node.receiveShadow = true;
+      }
+    });
+    return group;
+  }
+
   function createBlockMesh(type, size, material, variant = 'placed') {
-    if (type === 'door') {
+    const blockDef = getBlockDefinition(type);
+    const shape = blockDef && blockDef.shape ? blockDef.shape : 'cube';
+
+    if (shape === 'door') {
       const modelMesh = createDoorModelMesh(size, variant);
       if (modelMesh) {
         return modelMesh;
@@ -238,6 +379,33 @@
         mesh = new THREE.Mesh(createDoorPanelGeometry(size * 0.68, size * 0.98, size * 0.16), material);
       }
       return mesh;
+    }
+
+    if (shape === 'stairs') {
+      return createStairsMesh(size, material, variant);
+    }
+
+    if (shape === 'slab') {
+      let mesh;
+      if (variant === 'piece') {
+        mesh = new THREE.Mesh(new THREE.BoxGeometry(size * 0.72, size * 0.36, size * 0.72), material);
+      } else if (variant === 'carrier') {
+        mesh = new THREE.Mesh(new THREE.BoxGeometry(size, size * 0.55, size), material);
+      } else {
+        mesh = new THREE.Mesh(new THREE.BoxGeometry(size, size * 0.5, size), material);
+      }
+      mesh.position.y -= size * 0.25;
+      return mesh;
+    }
+
+    if (shape === 'pillar') {
+      if (variant === 'piece') {
+        return new THREE.Mesh(new THREE.BoxGeometry(size * 0.45, size * 0.72, size * 0.45), material);
+      }
+      if (variant === 'carrier') {
+        return new THREE.Mesh(new THREE.BoxGeometry(size * 0.72, size, size * 0.72), material);
+      }
+      return new THREE.Mesh(new THREE.BoxGeometry(size * 0.62, size, size * 0.62), material);
     }
 
     if (variant === 'piece') {
@@ -501,7 +669,8 @@
       }
 
       const overlaySrc = TEXTURE_DATA.railCornerOverlay;
-      if (typeof overlaySrc === 'string' && overlaySrc) {
+      const canUseOverlay = typeof overlaySrc === 'string' && overlaySrc.startsWith('data:image/');
+      if (canUseOverlay) {
         const overlay = new Image();
         overlay.onload = () => {
           ctx.imageSmoothingEnabled = false;
@@ -537,29 +706,25 @@
   const TREE_TEXTURE_SET = createMinecraftTreeTextureSet();
   const RAIL_TEXTURES = createMinecraftRailTextures();
   const MINECART_TEXTURE = createMinecartTexture();
-  const DEFAULT_EDITOR_LEVEL = {
-    blocks: (() => {
-      const blocks = [];
-      for (let z = -3; z <= 3; z += 1) {
-        for (let x = -5; x <= 5; x += 1) {
-          blocks.push({ type: 'stone', x, y: 0, z });
-        }
-      }
-      return blocks;
-    })(),
-  };
-  const DEFAULT_RAILS_LAYOUT = [
-    { type: 'straight', x: -1, z: 5, yaw: Math.PI * 0.5 },
-    { type: 'straight', x: 0, z: 5, yaw: Math.PI * 0.5 },
-    { type: 'straight', x: 1, z: 5, yaw: Math.PI * 0.5 },
-    { type: 'straight', x: 2, z: 5, yaw: Math.PI * 0.5 },
-    { type: 'straight', x: 3, z: 5, yaw: Math.PI * 0.5 },
-    { type: 'straight', x: 4, z: 5, yaw: Math.PI * 0.5 },
-    { type: 'straight', x: 5, z: 5, yaw: Math.PI * 0.5 },
-    { type: 'straight', x: 6, z: 5, yaw: Math.PI * 0.5 },
-    { type: 'straight', x: 7, z: 5, yaw: Math.PI * 1.5 },
-    { type: 'corner', x: 8, z: 5, yaw: 0 },
-  ];
+  function cloneLevelData(level) {
+    const source = level && typeof level === 'object' ? level : FALLBACK_LEVEL_DEF;
+    const blocks = Array.isArray(source.blocks) ? source.blocks.map((block) => ({ ...block })) : createFallbackBlocks();
+    const rails = Array.isArray(source.rails) ? source.rails.map((rail) => ({ ...rail })) : createFallbackRails();
+    const minecartSpeed = source.minecart && Number.isFinite(source.minecart.speed) ? source.minecart.speed : 11;
+    return {
+      id: source.id || FALLBACK_LEVEL_DEF.id,
+      name: source.name || source.id || 'Unnamed Level',
+      blocks,
+      rails,
+      minecartSpeed,
+      camera: source.camera && typeof source.camera === 'object' ? { ...source.camera } : null,
+    };
+  }
+
+  const INITIAL_LEVEL_ID = LEVEL_CATALOG[0] && LEVEL_CATALOG[0].id ? LEVEL_CATALOG[0].id : FALLBACK_LEVEL_DEF.id;
+  const INITIAL_LEVEL_DATA = cloneLevelData(LEVELS_BY_ID.get(INITIAL_LEVEL_ID) || FALLBACK_LEVEL_DEF);
+  const DEFAULT_EDITOR_LEVEL = { blocks: INITIAL_LEVEL_DATA.blocks };
+  const DEFAULT_RAILS_LAYOUT = INITIAL_LEVEL_DATA.rails;
 
   function easeOutCubic(t) {
     return 1 - (1 - t) ** 3;
@@ -1357,7 +1522,7 @@
         const x = Number(item.x);
         const y = Number(item.y);
         const z = Number(item.z);
-        const type = item.type || 'stone';
+        const type = item.type || DEFAULT_BLOCK_ID;
         if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
           continue;
         }
@@ -1799,13 +1964,18 @@
   }
 
   function createBlockMaterial(type, color) {
+    const blockDef = getBlockDefinition(type);
+    const shape = blockDef && blockDef.shape ? blockDef.shape : 'cube';
     const map = BLOCK_TEXTURES[type] || null;
-    const isDoor = type === 'door';
+    const isDoor = shape === 'door';
+    const baseColor = Number.isFinite(blockDef && blockDef.color) ? blockDef.color : color;
+    const roughness = shape === 'pillar' || type === 'wood' ? 0.9 : 0.78;
+    const metalness = type === 'stone' || type === 'stone_slab' ? 0.12 : 0.04;
     return new THREE.MeshStandardMaterial({
       map,
-      color: map ? 0xffffff : color,
-      roughness: type === 'wood' || isDoor ? 0.9 : 0.78,
-      metalness: type === 'stone' ? 0.12 : 0.04,
+      color: map ? 0xffffff : baseColor,
+      roughness,
+      metalness,
       transparent: false,
       alphaTest: 0,
       side: isDoor ? THREE.DoubleSide : THREE.FrontSide,
@@ -2295,7 +2465,7 @@
       this.createMaterial = options.createMaterial;
 
       this.enabled = false;
-      this.selectedType = 'stone';
+      this.selectedType = DEFAULT_BLOCK_ID;
       this.layer = 0;
       this.cells = new Map();
       this.raycaster = new THREE.Raycaster();
@@ -2607,17 +2777,20 @@
       this.clear();
       const list = data && Array.isArray(data.blocks) ? data.blocks : [];
       for (const block of list) {
-        this.placeBlock(block.type || 'stone', Number(block.x), Number(block.y), Number(block.z));
+        this.placeBlock(block.type || DEFAULT_BLOCK_ID, Number(block.x), Number(block.y), Number(block.z));
       }
     }
   }
 
-  const BLOCK_CONFIGS = [
-    { id: 'stone', label: 'Stone', type: 'stone', color: 0xa5a9af, count: 18 },
-    { id: 'wood', label: 'Wood', type: 'wood', color: 0xc9a26d, count: 12 },
-    { id: 'grass', label: 'Grass', type: 'grass', color: 0x8bbf67, count: 9 },
-    { id: 'door', label: 'Door', type: 'door', color: 0x8a6435, count: 6 },
-  ];
+  const BLOCK_CONFIGS = INVENTORY_BLOCK_DEFS.map((blockDef) => ({
+    id: blockDef.id,
+    label: blockDef.label || blockDef.id,
+    type: blockDef.id,
+    color: Number.isFinite(blockDef.color) ? blockDef.color : 0xffffff,
+    count: 0,
+  }));
+  const BLOCK_TYPE_SET = new Set(BLOCK_LIBRARY.map((blockDef) => blockDef.id));
+  let activeLevelId = INITIAL_LEVEL_DATA.id;
 
   const canvas = document.getElementById('app');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -2658,7 +2831,7 @@
     scene,
     trackController,
     startT: 0.126,
-    speed: 11,
+    speed: INITIAL_LEVEL_DATA.minecartSpeed,
   });
   const buildManager = new BuildManager(scene, {
     cellSize: 1,
@@ -2679,7 +2852,7 @@
     createMaterial: createBlockMaterial,
   });
   editor.loadJSON(DEFAULT_EDITOR_LEVEL);
-  const SCENE_STORAGE_KEY = 'prototype:scene_layout_v1';
+  const SCENE_STORAGE_KEY = 'minecraft_puzzle:scene_layout_v2';
   const LEGACY_RAILS_STORAGE_KEYS = ['prototype:rails_layout_v2', 'prototype:rails_layout_v1'];
   const debugEditor = document.getElementById('debug-editor');
   let uiHidden = false;
@@ -2932,7 +3105,8 @@
   function saveSceneLayout() {
     try {
       const snapshot = {
-        version: 1,
+        version: 2,
+        levelId: activeLevelId,
         blocks: getEditorBlocksSnapshot(),
         rails: railEditor.exportData(),
         minecart: {
@@ -2959,7 +3133,9 @@
   }
 
   function loadDefaultRails() {
-    railEditor.loadData(DEFAULT_RAILS_LAYOUT);
+    const levelData = cloneLevelData(LEVELS_BY_ID.get(activeLevelId) || FALLBACK_LEVEL_DEF);
+    const rails = normalizeRails(levelData.rails);
+    railEditor.loadData(rails.length > 0 ? rails : DEFAULT_RAILS_LAYOUT);
     trackController.setRailLayout(railEditor.exportData());
     saveSceneLayout();
   }
@@ -2969,6 +3145,8 @@
       return [];
     }
     const normalized = [];
+    const allowedTypes = BLOCK_TYPE_SET;
+    const used = new Set();
     for (const block of list) {
       if (!block || typeof block !== 'object') {
         continue;
@@ -2979,14 +3157,39 @@
       if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
         continue;
       }
+      const type = allowedTypes.has(block.type) ? block.type : DEFAULT_BLOCK_ID;
+      const ix = Math.round(x);
+      const iy = Math.max(0, Math.min(8, Math.round(y)));
+      const iz = Math.round(z);
+      const key = `${ix}:${iy}:${iz}`;
+      if (used.has(key)) {
+        continue;
+      }
+      used.add(key);
       normalized.push({
-        type: block.type || 'stone',
-        x,
-        y,
-        z,
+        type,
+        x: ix,
+        y: iy,
+        z: iz,
       });
     }
     return normalized;
+  }
+
+  function parseRailYaw(rail) {
+    const yawCandidate = rail && (
+      rail.yaw !== undefined ? rail.yaw
+        : (rail.rotation !== undefined ? rail.rotation : rail.rot)
+    );
+    let yaw = Number(yawCandidate);
+    if (!Number.isFinite(yaw)) {
+      return 0;
+    }
+    // If value looks like degrees (common in imported editor payloads), convert to radians.
+    if (Math.abs(yaw) > Math.PI * 2 + 1e-6) {
+      yaw = (yaw * Math.PI) / 180;
+    }
+    return yaw;
   }
 
   function normalizeRails(list) {
@@ -2994,27 +3197,219 @@
       return [];
     }
     const normalized = [];
+    const used = new Set();
     for (const rail of list) {
       if (!rail || typeof rail !== 'object') {
         continue;
       }
       const x = Number(rail.x);
       const z = Number(rail.z);
-      const yaw = Number(rail.yaw);
-      if (!Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(yaw)) {
+      const yaw = parseRailYaw(rail);
+      if (!Number.isFinite(x) || !Number.isFinite(z)) {
         continue;
       }
       if (rail.type !== 'straight' && rail.type !== 'corner') {
         continue;
       }
+      const key = `${Math.round(x)}:${Math.round(z)}`;
+      if (used.has(key)) {
+        continue;
+      }
+      used.add(key);
       normalized.push({
         type: rail.type,
-        x,
-        z,
+        x: Math.round(x),
+        z: Math.round(z),
         yaw,
       });
     }
     return normalized;
+  }
+
+  function centerBlocksInEditorBounds(blocksList, editorRef) {
+    const blocks = normalizeBlocks(blocksList);
+    if (blocks.length === 0) {
+      return [];
+    }
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (const block of blocks) {
+      minX = Math.min(minX, block.x);
+      maxX = Math.max(maxX, block.x);
+      minZ = Math.min(minZ, block.z);
+      maxZ = Math.max(maxZ, block.z);
+    }
+
+    const srcCenterX = (minX + maxX) * 0.5;
+    const srcCenterZ = (minZ + maxZ) * 0.5;
+    const dstCenterX = (editorRef.minX + editorRef.maxX) * 0.5;
+    const dstCenterZ = (editorRef.minZ + editorRef.maxZ) * 0.5;
+    const shiftX = Math.round(dstCenterX - srcCenterX);
+    const shiftZ = Math.round(dstCenterZ - srcCenterZ);
+
+    const centered = [];
+    const used = new Set();
+    for (const block of blocks) {
+      const x = block.x + shiftX;
+      const z = block.z + shiftZ;
+      if (x < editorRef.minX || x > editorRef.maxX || z < editorRef.minZ || z > editorRef.maxZ) {
+        continue;
+      }
+      const key = `${x}:${block.y}:${z}`;
+      if (used.has(key)) {
+        continue;
+      }
+      used.add(key);
+      centered.push({
+        type: block.type,
+        x,
+        y: block.y,
+        z,
+      });
+    }
+
+    return centered;
+  }
+
+  function stripCodeFences(raw) {
+    const text = String(raw || '')
+      .replace(/^\uFEFF/, '')
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      .trim();
+    const fenced = text.match(/^```[a-zA-Z0-9_-]*\s*([\s\S]*?)\s*```$/);
+    return fenced ? fenced[1].trim() : text;
+  }
+
+  function sliceToJsonLike(text) {
+    const src = String(text || '').trim();
+    if (!src) {
+      return '';
+    }
+    const firstBrace = src.indexOf('{');
+    const firstBracket = src.indexOf('[');
+    let start = -1;
+    if (firstBrace >= 0 && firstBracket >= 0) {
+      start = Math.min(firstBrace, firstBracket);
+    } else {
+      start = Math.max(firstBrace, firstBracket);
+    }
+    if (start < 0) {
+      return src;
+    }
+    const endBrace = src.lastIndexOf('}');
+    const endBracket = src.lastIndexOf(']');
+    const end = Math.max(endBrace, endBracket);
+    if (end >= start) {
+      return src.slice(start, end + 1).trim();
+    }
+    return src.slice(start).trim();
+  }
+
+  function extractLiteralPayload(raw) {
+    const text = stripCodeFences(raw).trim();
+    if (!text) {
+      return '';
+    }
+    // Support "const data = {...};" / "data = [...] ;"
+    const assignMatch = text.match(/^(?:const|let|var)?\s*[a-zA-Z_$][\w$]*\s*=\s*([\s\S]+)$/);
+    const candidate = (assignMatch ? assignMatch[1] : text).trim();
+    return sliceToJsonLike(candidate.replace(/;\s*$/, ''));
+  }
+
+  function parseJsonLoose(raw) {
+    const payload = extractLiteralPayload(raw);
+    if (!payload) {
+      throw new Error('Empty payload');
+    }
+
+    try {
+      return JSON.parse(payload);
+    } catch (_errorA) {
+      try {
+        // JS-like object fallback: unquoted keys + single quotes.
+        const withQuotedKeys = payload.replace(/([{,]\s*)([A-Za-z_$][\w$-]*)(\s*:)/g, '$1"$2"$3');
+        const relaxed = withQuotedKeys.replace(/'/g, '"');
+        return JSON.parse(relaxed);
+      } catch (_errorB) {
+        try {
+          // JSONC/JS-ish fallback: comments + trailing commas.
+          const noComments = payload
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/^\s*\/\/.*$/gm, '');
+          const noTrailingCommas = noComments.replace(/,\s*([}\]])/g, '$1');
+          return JSON.parse(noTrailingCommas);
+        } catch (_errorC) {
+          try {
+            // Final fallback for JS literal objects/arrays.
+            return Function(`"use strict"; return (${payload});`)();
+          } catch (_errorD) {
+            throw new Error('Unsupported JSON format');
+          }
+        }
+      }
+    }
+  }
+
+  function extractRailsFromArbitraryText(raw) {
+    const text = String(raw || '');
+    const chunks = text.match(/\{[^{}]*\}/g) || [];
+    const rails = [];
+    for (const chunk of chunks) {
+      const typeMatch = chunk.match(/\btype\b\s*[:=]\s*["']?(straight|corner)["']?/i);
+      const xMatch = chunk.match(/\bx\b\s*[:=]\s*(-?\d+(?:\.\d+)?)/i);
+      const zMatch = chunk.match(/\bz\b\s*[:=]\s*(-?\d+(?:\.\d+)?)/i);
+      const yawMatch = chunk.match(/\b(?:yaw|rotation|rot)\b\s*[:=]\s*(-?\d+(?:\.\d+)?)/i);
+      if (!typeMatch || !xMatch || !zMatch) {
+        continue;
+      }
+      const type = String(typeMatch[1]).toLowerCase();
+      if (type !== 'straight' && type !== 'corner') {
+        continue;
+      }
+      rails.push({
+        type,
+        x: Number(xMatch[1]),
+        z: Number(zMatch[1]),
+        yaw: yawMatch ? Number(yawMatch[1]) : 0,
+      });
+    }
+    return normalizeRails(rails);
+  }
+
+  function pickRailsPayload(parsed) {
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+    if (Array.isArray(parsed.rails)) {
+      return parsed.rails;
+    }
+    if (parsed.data && Array.isArray(parsed.data.rails)) {
+      return parsed.data.rails;
+    }
+    return null;
+  }
+
+  function pickBlocksPayload(parsed) {
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+    if (Array.isArray(parsed.blocks)) {
+      return parsed.blocks;
+    }
+    if (parsed.data && Array.isArray(parsed.data.blocks)) {
+      return parsed.data.blocks;
+    }
+    return null;
   }
 
   function restoreSceneLayout() {
@@ -3022,14 +3417,16 @@
       const raw = localStorage.getItem(SCENE_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
+        const levelData = cloneLevelData(LEVELS_BY_ID.get(parsed && parsed.levelId) || INITIAL_LEVEL_DATA);
+        activeLevelId = levelData.id;
         const blocks = normalizeBlocks(parsed && parsed.blocks);
         const rails = normalizeRails(parsed && parsed.rails);
         const speed = Number(parsed && parsed.minecart && parsed.minecart.speed);
         const cameraSettings = normalizeCameraSettings(parsed && parsed.camera);
 
         const sceneData = {
-          blocks: blocks.length > 0 ? blocks : DEFAULT_EDITOR_LEVEL.blocks,
-          rails: rails.length > 0 ? rails : DEFAULT_RAILS_LAYOUT,
+          blocks: blocks.length > 0 ? blocks : normalizeBlocks(levelData.blocks),
+          rails: rails.length > 0 ? rails : normalizeRails(levelData.rails),
         };
         editor.loadJSON(sceneData);
         buildManager.loadFromLevel(sceneData);
@@ -3037,10 +3434,18 @@
         trackController.setRailLayout(railEditor.exportData());
         if (Number.isFinite(speed) && speed > 0) {
           minecart.setSpeed(speed);
+        } else {
+          minecart.setSpeed(levelData.minecartSpeed);
         }
         if (cameraSettings) {
           Object.assign(cameraDebugState, cameraSettings);
           applyCameraDebugState();
+        } else if (levelData.camera) {
+          const defaultLevelCamera = normalizeCameraSettings(levelData.camera);
+          if (defaultLevelCamera) {
+            Object.assign(cameraDebugState, defaultLevelCamera);
+            applyCameraDebugState();
+          }
         }
         return true;
       }
@@ -3058,11 +3463,16 @@
         if (legacyRails.length === 0) {
           continue;
         }
-        const sceneData = { blocks: DEFAULT_EDITOR_LEVEL.blocks, rails: legacyRails };
+        const levelData = cloneLevelData(LEVELS_BY_ID.get(activeLevelId) || INITIAL_LEVEL_DATA);
+        const sceneData = {
+          blocks: normalizeBlocks(levelData.blocks),
+          rails: legacyRails,
+        };
         editor.loadJSON(sceneData);
         buildManager.loadFromLevel(sceneData);
         railEditor.loadData(sceneData.rails);
         trackController.setRailLayout(railEditor.exportData());
+        minecart.setSpeed(levelData.minecartSpeed);
         saveSceneLayout();
         return true;
       }
@@ -3081,31 +3491,23 @@
     onChange: handleRailLayoutChange,
   });
   if (!restoreSceneLayout()) {
-    editor.loadJSON(DEFAULT_EDITOR_LEVEL);
-    buildManager.loadFromLevel(DEFAULT_EDITOR_LEVEL);
-    loadDefaultRails();
-  }
-
-  function removeDoorsFromField() {
-    const exported = JSON.parse(editor.exportJSON());
-    const blocks = Array.isArray(exported.blocks) ? exported.blocks : [];
-    const filteredBlocks = blocks.filter((block) => block && block.type !== 'door');
-    if (filteredBlocks.length === blocks.length) {
-      return false;
-    }
-
+    const levelData = cloneLevelData(LEVELS_BY_ID.get(activeLevelId) || INITIAL_LEVEL_DATA);
     const sceneData = {
-      blocks: filteredBlocks,
-      rails: railEditor.exportData(),
+      blocks: normalizeBlocks(levelData.blocks),
+      rails: normalizeRails(levelData.rails),
     };
     editor.loadJSON(sceneData);
     buildManager.loadFromLevel(sceneData);
-    trackController.setRailLayout(sceneData.rails);
-    saveSceneLayout();
-    return true;
+    minecart.setSpeed(levelData.minecartSpeed);
+    if (levelData.camera) {
+      const levelCamera = normalizeCameraSettings(levelData.camera);
+      if (levelCamera) {
+        Object.assign(cameraDebugState, levelCamera);
+        applyCameraDebugState();
+      }
+    }
+    loadDefaultRails();
   }
-
-  removeDoorsFromField();
   minecart.snapToNearestPoint(new THREE.Vector3(9.8, trackController.pathY, 0));
   ensureDoorModelLoading();
   ensureDoorShowcaseNearMinecart(scene, minecart);
@@ -3195,6 +3597,9 @@
   function bindDebugEditorUI() {
     const enabledInput = document.getElementById('editor-enabled');
     const blockSelect = document.getElementById('editor-block');
+    const levelSelect = document.getElementById('level-select');
+    const levelLoadBtn = document.getElementById('level-load');
+    const levelExportModuleBtn = document.getElementById('level-export-module');
     const layerInput = document.getElementById('editor-layer');
     const clearBtn = document.getElementById('editor-clear');
     const railEnabledInput = document.getElementById('rail-enabled');
@@ -3203,6 +3608,9 @@
     const minecartSpeedInput = document.getElementById('minecart-speed');
     const railClearBtn = document.getElementById('rail-clear');
     const railAutoBtn = document.getElementById('rail-auto');
+    const railExportBtn = document.getElementById('rail-export');
+    const railImportBtn = document.getElementById('rail-import');
+    const blocksImportCenterBtn = document.getElementById('blocks-import-center');
     const exportBtn = document.getElementById('editor-export');
     const applyBtn = document.getElementById('editor-apply');
     const cameraFlyEnabledInput = document.getElementById('cam-fly-enabled');
@@ -3225,6 +3633,37 @@
     const cameraFilmOffsetInput = document.getElementById('cam-film-offset');
     const cameraResetBtn = document.getElementById('cam-reset');
     const cameraCopyBtn = document.getElementById('cam-copy');
+
+    function populateBlockSelect() {
+      blockSelect.innerHTML = '';
+      for (const blockDef of BLOCK_LIBRARY) {
+        const option = document.createElement('option');
+        option.value = blockDef.id;
+        option.textContent = blockDef.label || blockDef.id;
+        blockSelect.appendChild(option);
+      }
+      const eraseOption = document.createElement('option');
+      eraseOption.value = 'erase';
+      eraseOption.textContent = 'Erase';
+      blockSelect.appendChild(eraseOption);
+    }
+
+    function populateLevelSelect() {
+      if (!levelSelect) {
+        return;
+      }
+      levelSelect.innerHTML = '';
+      for (const level of LEVEL_CATALOG) {
+        if (!level || !level.id) {
+          continue;
+        }
+        const option = document.createElement('option');
+        option.value = level.id;
+        option.textContent = level.name || level.id;
+        levelSelect.appendChild(option);
+      }
+      levelSelect.value = activeLevelId;
+    }
 
     function setCameraInputsFromState() {
       cameraFlyEnabledInput.checked = flyCamEnabled;
@@ -3273,9 +3712,76 @@
       saveSceneLayout();
     }
 
+    function loadSelectedLevel(levelId) {
+      const levelData = cloneLevelData(LEVELS_BY_ID.get(levelId) || INITIAL_LEVEL_DATA);
+      activeLevelId = levelData.id;
+
+      const sceneData = {
+        blocks: normalizeBlocks(levelData.blocks),
+        rails: normalizeRails(levelData.rails),
+      };
+      editor.loadJSON(sceneData);
+      buildManager.loadFromLevel(sceneData);
+      railEditor.loadData(sceneData.rails);
+      trackController.setRailLayout(railEditor.exportData());
+      minecart.setSpeed(levelData.minecartSpeed);
+      minecartSpeedInput.value = String(minecart.getSpeed());
+
+      if (levelData.camera) {
+        const levelCamera = normalizeCameraSettings(levelData.camera);
+        if (levelCamera) {
+          Object.assign(cameraDebugState, levelCamera);
+          applyCameraDebugState();
+          setCameraInputsFromState();
+        }
+      }
+
+      minecart.snapToNearestPoint(new THREE.Vector3(9.8, trackController.pathY, 0));
+      syncBlockCountsFromLevel();
+      refreshUiLockState();
+      saveSceneLayout();
+      if (levelSelect) {
+        levelSelect.value = activeLevelId;
+      }
+    }
+
     enabledInput.addEventListener('change', () => {
       editor.setEnabled(enabledInput.checked);
     });
+
+    if (levelLoadBtn && levelSelect) {
+      levelLoadBtn.addEventListener('click', () => {
+        if (activeBlockId !== null) {
+          window.alert('Finish active block cycle first, then load another level.');
+          return;
+        }
+        loadSelectedLevel(levelSelect.value);
+      });
+    }
+
+    if (levelExportModuleBtn) {
+      levelExportModuleBtn.addEventListener('click', async () => {
+        const exported = JSON.parse(editor.exportJSON());
+        const payload = {
+          id: `${activeLevelId || 'new_level'}_copy`,
+          name: 'New Level',
+          blocks: Array.isArray(exported.blocks) ? exported.blocks : [],
+          rails: railEditor.exportData(),
+          minecart: { speed: minecart.getSpeed() },
+        };
+        const moduleText = [
+          '(function () {',
+          `  window.registerMinecraftLevel(${JSON.stringify(payload, null, 2)});`,
+          '})();',
+        ].join('\n');
+        try {
+          await navigator.clipboard.writeText(moduleText);
+        } catch (error) {
+          console.warn('Clipboard write failed, showing module text in prompt', error);
+        }
+        window.prompt('Level module JS', moduleText);
+      });
+    }
 
     blockSelect.addEventListener('change', () => {
       editor.setType(blockSelect.value);
@@ -3311,11 +3817,98 @@
     railAutoBtn.addEventListener('click', () => {
       autoPlaceRails();
     });
+    railExportBtn.addEventListener('click', async () => {
+      const text = JSON.stringify({ rails: railEditor.exportData() }, null, 2);
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (error) {
+        console.warn('Clipboard write failed, showing rails JSON in prompt', error);
+      }
+      window.prompt('Rails JSON', text);
+    });
+    railImportBtn.addEventListener('click', () => {
+      if (activeBlockId !== null) {
+        window.alert('Finish active block cycle first, then import rails.');
+        return;
+      }
+      const raw = window.prompt('Paste Rails JSON ({"rails":[...]} or plain array)');
+      if (!raw) {
+        return;
+      }
+      try {
+        const parsed = parseJsonLoose(raw);
+        const rails = normalizeRails(pickRailsPayload(parsed));
+        if (rails.length === 0) {
+          const extractedRails = extractRailsFromArbitraryText(raw);
+          if (extractedRails.length === 0) {
+            window.alert('No valid rails found in JSON.');
+            return;
+          }
+          railEditor.loadData(extractedRails);
+          trackController.setRailLayout(railEditor.exportData());
+          saveSceneLayout();
+          window.alert(`Imported rails: ${extractedRails.length}`);
+          return;
+        }
+        railEditor.loadData(rails);
+        trackController.setRailLayout(railEditor.exportData());
+        saveSceneLayout();
+        window.alert(`Imported rails: ${rails.length}`);
+      } catch (error) {
+        const extractedRails = extractRailsFromArbitraryText(raw);
+        if (extractedRails.length > 0) {
+          railEditor.loadData(extractedRails);
+          trackController.setRailLayout(railEditor.exportData());
+          saveSceneLayout();
+          window.alert(`Imported rails: ${extractedRails.length}`);
+          return;
+        }
+        console.warn('Failed to import rails JSON', error);
+        const reason = error && error.message ? `\nReason: ${error.message}` : '';
+        window.alert(`Failed to import rails JSON.${reason}`);
+      }
+    });
+    blocksImportCenterBtn.addEventListener('click', () => {
+      if (activeBlockId !== null) {
+        window.alert('Finish active block cycle first, then import blocks.');
+        return;
+      }
+      const raw = window.prompt('Paste Blocks JSON ({"blocks":[...]} or plain array)');
+      if (!raw) {
+        return;
+      }
+      try {
+        const parsed = parseJsonLoose(raw);
+        const blocksRaw = pickBlocksPayload(parsed);
+        const centered = centerBlocksInEditorBounds(blocksRaw, editor);
+        if (centered.length === 0) {
+          window.alert('No valid blocks found (or all blocks are outside editor bounds).');
+          return;
+        }
+
+        const data = {
+          blocks: centered,
+          rails: railEditor.exportData(),
+        };
+        editor.loadJSON(data);
+        buildManager.loadFromLevel(data);
+        syncBlockCountsFromLevel();
+        refreshUiLockState();
+        saveSceneLayout();
+        window.alert(`Imported blocks (centered): ${centered.length}`);
+      } catch (error) {
+        console.warn('Failed to import blocks JSON', error);
+        const reason = error && error.message ? `\nReason: ${error.message}` : '';
+        window.alert(`Failed to import blocks JSON.${reason}`);
+      }
+    });
 
     exportBtn.addEventListener('click', async () => {
       const payload = {
+        levelId: activeLevelId,
         blocks: JSON.parse(editor.exportJSON()).blocks || [],
         rails: railEditor.exportData(),
+        minecart: { speed: minecart.getSpeed() },
       };
       const text = JSON.stringify(payload, null, 2);
       try {
@@ -3381,6 +3974,12 @@
       window.prompt('Camera JSON', text);
     });
 
+    populateBlockSelect();
+    populateLevelSelect();
+    if (levelSelect) {
+      levelSelect.value = activeLevelId;
+    }
+    blockSelect.value = blockSelect.value || DEFAULT_BLOCK_ID;
     editor.setType(blockSelect.value);
     editor.setLayer(Number(layerInput.value));
     railEditor.setType(railTypeSelect.value);
@@ -3424,6 +4023,9 @@
       editor: {
         enabled: editor.isEnabled(),
         placed_blocks: editor.cells.size,
+      },
+      level: {
+        id: activeLevelId,
       },
       inventory: Array.from(blocks.entries()).map(([id, block]) => ({ id, count: block.getCount() })),
       build_progress: {

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>3D Build Prototype</title>
+    <title>Minecraft Puzzle Builder</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -16,14 +16,16 @@
         <input id="editor-enabled" type="checkbox" />
       </label>
       <label class="debug-row">
+        <span>Level</span>
+        <select id="level-select"></select>
+      </label>
+      <div class="debug-actions">
+        <button id="level-load" type="button">Load Level</button>
+        <button id="level-export-module" type="button">Export Level JS</button>
+      </div>
+      <label class="debug-row">
         <span>Block</span>
-        <select id="editor-block">
-          <option value="stone">Stone</option>
-          <option value="wood">Wood</option>
-          <option value="grass">Grass</option>
-          <option value="door">Door</option>
-          <option value="erase">Erase</option>
-        </select>
+        <select id="editor-block"></select>
       </label>
       <label class="debug-row">
         <span>Layer Y</span>
@@ -58,6 +60,9 @@
         <button id="editor-clear" type="button">Clear</button>
         <button id="rail-clear" type="button">Clear Rails</button>
         <button id="rail-auto" type="button">Auto Rails</button>
+        <button id="rail-export" type="button">Export Rails</button>
+        <button id="rail-import" type="button">Import Rails</button>
+        <button id="blocks-import-center" type="button">Import Blocks Center</button>
         <button id="editor-export" type="button">Export JSON</button>
         <button id="editor-apply" type="button">Use As Target</button>
       </div>
@@ -143,7 +148,11 @@
 
     <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/examples/js/loaders/GLTFLoader.js"></script>
-    <script src="./js/prototype/texture-data.js"></script>
-    <script src="./js/prototype/app.js?v=20260319-04"></script>
+    <script src="./js/game/data/texture-data.js"></script>
+    <script src="./js/game/data/block-library.js"></script>
+    <script src="./js/game/data/levels/registry.js"></script>
+    <script src="./js/game/data/levels/level-01-starter.js"></script>
+    <script src="./js/game/data/levels/level-02-forms.js"></script>
+    <script src="./js/game/app.js?v=20260320-02"></script>
   </body>
 </html>
