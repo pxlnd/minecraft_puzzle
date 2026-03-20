@@ -181,6 +181,84 @@
     const source = resolveTexturePath(blockDef.textureKey, blockDef.fallbackTexture);
     BLOCK_TEXTURES[blockDef.id] = source ? loadTexture(source, { pixelated: true }) : null;
   }
+  const EDITOR_TEXTURE_MODE_AUTO = 'auto';
+  const BLOCK_ROTATION_STEPS_DEG = [0, 90, 180, 270];
+  const BLOCK_TEXTURE_KEYS = Array.from(new Set(
+    BLOCK_LIBRARY
+      .map((blockDef) => blockDef && blockDef.textureKey)
+      .concat(Object.keys(TEXTURE_DATA || {}))
+      .filter((key) => key && key !== 'railCornerOverlay'),
+  ));
+  const BLOCK_TEXTURES_BY_KEY = {};
+  for (const textureKey of BLOCK_TEXTURE_KEYS) {
+    const texturePath = resolveTexturePath(textureKey, '');
+    BLOCK_TEXTURES_BY_KEY[textureKey] = texturePath ? loadTexture(texturePath, { pixelated: true }) : null;
+  }
+  const SHAPE_LABELS = {
+    cube: 'Cube',
+    slab: 'Slab',
+    pillar: 'Pillar',
+    stairs: 'Stairs',
+    door: 'Door',
+  };
+  const BLOCK_SHAPE_OPTIONS = [];
+  const BLOCK_SHAPE_SET = new Set();
+  for (const blockDef of BLOCK_LIBRARY) {
+    if (!blockDef || !blockDef.id) {
+      continue;
+    }
+    const shape = blockDef.shape || 'cube';
+    if (BLOCK_SHAPE_SET.has(shape)) {
+      continue;
+    }
+    BLOCK_SHAPE_SET.add(shape);
+    BLOCK_SHAPE_OPTIONS.push({
+      id: shape,
+      shape,
+      type: blockDef.id,
+      label: SHAPE_LABELS[shape] || shape,
+    });
+  }
+  const SHAPE_PREVIEW_TEXTURE_KEY = BLOCK_TEXTURE_KEYS.includes('stone')
+    ? 'stone'
+    : (BLOCK_TEXTURE_KEYS[0] || '');
+  const SHAPE_PREVIEW_TEXTURE_SOURCE = SHAPE_PREVIEW_TEXTURE_KEY
+    ? resolveTexturePath(SHAPE_PREVIEW_TEXTURE_KEY, '')
+    : '';
+
+  function normalizeBlockRotationDeg(value) {
+    let deg = Number(value);
+    if (!Number.isFinite(deg)) {
+      return 0;
+    }
+    if (Math.abs(deg) <= Math.PI * 2 + 1e-6) {
+      deg = (deg * 180) / Math.PI;
+    }
+    let wrapped = ((deg % 360) + 360) % 360;
+    let best = 0;
+    let bestDist = Infinity;
+    for (const candidate of BLOCK_ROTATION_STEPS_DEG) {
+      const diff = Math.abs(wrapped - candidate);
+      if (diff < bestDist) {
+        bestDist = diff;
+        best = candidate;
+      }
+    }
+    if (wrapped > 315 || wrapped < 45) {
+      return 0;
+    }
+    return best;
+  }
+
+  function normalizeEditorTextureKey(value) {
+    if (value === undefined || value === null || value === '' || value === EDITOR_TEXTURE_MODE_AUTO) {
+      return EDITOR_TEXTURE_MODE_AUTO;
+    }
+    const key = String(value);
+    return Object.prototype.hasOwnProperty.call(BLOCK_TEXTURES_BY_KEY, key)
+      ? key
+      : EDITOR_TEXTURE_MODE_AUTO;
+  }
   const doorBlockDef = getBlockDefinition('door');
   const doorFallback = doorBlockDef ? doorBlockDef.fallbackTexture : './assets/block/minecraft_oak_door_item.png';
   const doorTopPath = resolveTexturePath(
@@ -1976,10 +2054,13 @@
     texture.needsUpdate = true;
   }
 
-  function createBlockMaterial(type, color) {
+  function createBlockMaterial(type, color, options = null) {
     const blockDef = getBlockDefinition(type);
     const shape = blockDef && blockDef.shape ? blockDef.shape : 'cube';
-    const map = BLOCK_TEXTURES[type] || null;
+    const textureKey = normalizeEditorTextureKey(options && options.textureKey);
+    const map = textureKey !== EDITOR_TEXTURE_MODE_AUTO
+      ? (BLOCK_TEXTURES_BY_KEY[textureKey] || BLOCK_TEXTURES[type] || null)
+      : (BLOCK_TEXTURES[type] || null);
     const isDoor = shape === 'door';
     const baseColor = Number.isFinite(blockDef && blockDef.color) ? blockDef.color : color;
     const roughness = shape === 'pillar' || type === 'wood' ? 0.9 : 0.78;
@@ -2481,6 +2562,8 @@
 
       this.enabled = false;
       this.selectedType = DEFAULT_BLOCK_ID;
+      this.selectedTextureKey = EDITOR_TEXTURE_MODE_AUTO;
+      this.selectedRotationDeg = 0;
       this.layer = 0;
       this.cells = new Map();
       this.raycaster = new THREE.Raycaster();
@@ -2557,6 +2640,14 @@
 
     setType(type) {
       this.selectedType = type;
+    }
+
+    setTextureKey(textureKey) {
+      this.selectedTextureKey = normalizeEditorTextureKey(textureKey);
+    }
+
+    setRotationDeg(rotationDeg) {
+      this.selectedRotationDeg = normalizeBlockRotationDeg(rotationDeg);
     }
 
     setLayer(layer) {
@@ -2768,22 +2859,36 @@
       const mesh = createBlockMesh(
         this.selectedType,
         this.boxSize,
-        this.createMaterial(this.selectedType, 0xffffff),
+        this.createMaterial(this.selectedType, 0xffffff, { textureKey: this.selectedTextureKey }),
         'placed',
       );
       mesh.position.copy(this.cellToPosition(x, targetY, z));
+      mesh.rotation.y = (this.selectedRotationDeg * Math.PI) / 180;
       attachCellUserData(mesh, { x, y: targetY, z });
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.group.add(mesh);
-      this.cells.set(targetKey, { type: this.selectedType, x, y: targetY, z, mesh });
+      this.cells.set(targetKey, {
+        type: this.selectedType,
+        textureKey: this.selectedTextureKey,
+        rotYDeg: this.selectedRotationDeg,
+        x,
+        y: targetY,
+        z,
+        mesh,
+      });
       this.notifyChange();
     }
 
-    placeBlock(type, x, y, z) {
+    placeBlock(type, x, y, z, options = null) {
       if (x < this.minX || x > this.maxX || z < this.minZ || z > this.maxZ || y < 0 || y > 8) {
         return;
       }
+      const textureKey = normalizeEditorTextureKey(options && (options.textureKey !== undefined ? options.textureKey : options.texture));
+      const rotYDeg = normalizeBlockRotationDeg(options && (
+        options.rotYDeg !== undefined ? options.rotYDeg
+          : (options.rotationDeg !== undefined ? options.rotationDeg : (options.rotation !== undefined ? options.rotation : options.rotY))
+      ));
       const key = this.getCellKey(x, y, z);
       const existing = this.cells.get(key);
       if (existing) {
@@ -2794,15 +2899,16 @@
       const mesh = createBlockMesh(
         type,
         this.boxSize,
-        this.createMaterial(type, 0xffffff),
+        this.createMaterial(type, 0xffffff, { textureKey }),
         'placed',
       );
       mesh.position.copy(this.cellToPosition(x, y, z));
+      mesh.rotation.y = (rotYDeg * Math.PI) / 180;
       attachCellUserData(mesh, { x, y, z });
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.group.add(mesh);
-      this.cells.set(key, { type, x, y, z, mesh });
+      this.cells.set(key, { type, textureKey, rotYDeg, x, y, z, mesh });
     }
 
     clear(shouldNotify = true) {
@@ -2818,7 +2924,16 @@
 
     exportJSON() {
       const blocks = Array.from(this.cells.values())
-        .map(({ type, x, y, z }) => ({ type, x, y, z }))
+        .map(({ type, textureKey, rotYDeg, x, y, z }) => {
+          const block = { type, x, y, z };
+          if (textureKey && textureKey !== EDITOR_TEXTURE_MODE_AUTO) {
+            block.texture = textureKey;
+          }
+          if (rotYDeg) {
+            block.rotYDeg = rotYDeg;
+          }
+          return block;
+        })
         .sort((a, b) => (a.y - b.y) || (a.z - b.z) || (a.x - b.x));
       return JSON.stringify({ blocks }, null, 2);
     }
@@ -2828,7 +2943,7 @@
       this.clear(false);
       const list = data && Array.isArray(data.blocks) ? data.blocks : [];
       for (const block of list) {
-        this.placeBlock(block.type || DEFAULT_BLOCK_ID, Number(block.x), Number(block.y), Number(block.z));
+        this.placeBlock(block.type || DEFAULT_BLOCK_ID, Number(block.x), Number(block.y), Number(block.z), block);
       }
       this.suspendChangeEvents = Math.max(0, this.suspendChangeEvents - 1);
       this.notifyChange();
@@ -3302,12 +3417,26 @@
         continue;
       }
       used.add(key);
-      normalized.push({
+      const textureKey = normalizeEditorTextureKey(
+        block.textureKey !== undefined ? block.textureKey : block.texture,
+      );
+      const rotYDeg = normalizeBlockRotationDeg(
+        block.rotYDeg !== undefined ? block.rotYDeg
+          : (block.rotY !== undefined ? block.rotY : (block.rot !== undefined ? block.rot : block.rotation)),
+      );
+      const normalizedBlock = {
         type,
         x: ix,
         y: iy,
         z: iz,
-      });
+      };
+      if (textureKey !== EDITOR_TEXTURE_MODE_AUTO) {
+        normalizedBlock.texture = textureKey;
+      }
+      if (rotYDeg) {
+        normalizedBlock.rotYDeg = rotYDeg;
+      }
+      normalized.push(normalizedBlock);
     }
     return normalized;
   }
@@ -3869,14 +3998,15 @@
 
   function bindDebugEditorUI() {
     const enabledInput = document.getElementById('editor-enabled');
-    const blockSelect = document.getElementById('editor-block');
+    const shapeSelectHost = document.getElementById('editor-shape-select');
+    const textureSelectHost = document.getElementById('editor-texture-select');
+    const blockRotYSelect = document.getElementById('editor-rot-y');
     const levelSelect = document.getElementById('level-select');
     const levelNameInput = document.getElementById('level-name');
     const levelLoadBtn = document.getElementById('level-load');
     const levelSaveFileBtn = document.getElementById('level-save-file');
     const levelOpenFileBtn = document.getElementById('level-open-file');
     const levelFileInput = document.getElementById('level-file-input');
-    const layerInput = document.getElementById('editor-layer');
     const clearBuildingBtn = document.getElementById('editor-clear-building');
     const railEnabledInput = document.getElementById('rail-enabled');
     const railTypeSelect = document.getElementById('rail-type');
@@ -3907,15 +4037,107 @@
     const cameraFilmGaugeInput = document.getElementById('cam-film-gauge');
     const cameraFilmOffsetInput = document.getElementById('cam-film-offset');
     const cameraResetBtn = document.getElementById('cam-reset');
+    let shapeDropdownApi = null;
+    let textureDropdownApi = null;
 
-    function populateBlockSelect() {
-      blockSelect.innerHTML = '';
-      for (const blockDef of BLOCK_LIBRARY) {
-        const option = document.createElement('option');
-        option.value = blockDef.id;
-        option.textContent = blockDef.label || blockDef.id;
-        blockSelect.appendChild(option);
+    function createPreviewSelect(root, options, initialValue, onChange) {
+      if (!root) {
+        return {
+          setValue() {},
+          getValue() { return initialValue; },
+        };
       }
+      let selectedValue = initialValue;
+      root.innerHTML = '';
+      root.classList.remove('is-open');
+
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'debug-preview-toggle';
+
+      const toggleThumb = document.createElement('span');
+      toggleThumb.className = 'debug-preview-thumb';
+      const toggleLabel = document.createElement('span');
+      const toggleCaret = document.createElement('span');
+      toggleCaret.className = 'debug-preview-caret';
+      toggleCaret.textContent = '▼';
+      toggle.appendChild(toggleThumb);
+      toggle.appendChild(toggleLabel);
+      toggle.appendChild(toggleCaret);
+
+      const menu = document.createElement('div');
+      menu.className = 'debug-preview-menu';
+      root.appendChild(toggle);
+      root.appendChild(menu);
+
+      function applyThumb(thumb, option) {
+        thumb.className = 'debug-preview-thumb';
+        if (option.shapeClass) {
+          thumb.classList.add(option.shapeClass);
+        }
+        thumb.style.backgroundImage = option.previewSrc ? `url("${option.previewSrc}")` : '';
+      }
+
+      function renderMenu() {
+        menu.innerHTML = '';
+        for (const option of options) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'debug-preview-option';
+          if (option.value === selectedValue) {
+            btn.classList.add('is-active');
+          }
+          const thumb = document.createElement('span');
+          applyThumb(thumb, option);
+          const label = document.createElement('span');
+          label.textContent = option.label;
+          btn.appendChild(thumb);
+          btn.appendChild(label);
+          btn.addEventListener('click', () => {
+            selectedValue = option.value;
+            renderToggle();
+            renderMenu();
+            root.classList.remove('is-open');
+            if (onChange) {
+              onChange(selectedValue);
+            }
+          });
+          menu.appendChild(btn);
+        }
+      }
+
+      function renderToggle() {
+        const option = options.find((item) => item.value === selectedValue) || options[0];
+        if (!option) {
+          return;
+        }
+        selectedValue = option.value;
+        applyThumb(toggleThumb, option);
+        toggleLabel.textContent = option.label;
+      }
+
+      toggle.addEventListener('click', () => {
+        root.classList.toggle('is-open');
+      });
+      document.addEventListener('click', (event) => {
+        if (!root.contains(event.target)) {
+          root.classList.remove('is-open');
+        }
+      });
+
+      renderToggle();
+      renderMenu();
+      return {
+        setValue(value) {
+          const hasValue = options.some((option) => option.value === value);
+          selectedValue = hasValue ? value : (options[0] ? options[0].value : value);
+          renderToggle();
+          renderMenu();
+        },
+        getValue() {
+          return selectedValue;
+        },
+      };
     }
 
     function populateLevelSelect() {
@@ -4199,14 +4421,13 @@
       });
     }
 
-    blockSelect.addEventListener('change', () => {
-      editor.setType(blockSelect.value);
-    });
-
-    layerInput.addEventListener('change', () => {
-      editor.setLayer(Number(layerInput.value));
-      layerInput.value = String(editor.layer);
-    });
+    if (blockRotYSelect) {
+      blockRotYSelect.addEventListener('change', () => {
+        const rotationDeg = normalizeBlockRotationDeg(blockRotYSelect.value);
+        blockRotYSelect.value = String(rotationDeg);
+        editor.setRotationDeg(rotationDeg);
+      });
+    }
     if (clearBuildingBtn) {
       clearBuildingBtn.addEventListener('click', () => {
         if (activeBlockId !== null) {
@@ -4319,15 +4540,49 @@
       saveSceneLayout();
     });
 
-    populateBlockSelect();
+    const shapeOptions = BLOCK_SHAPE_OPTIONS.map((option) => ({
+      value: option.id,
+      label: option.label,
+      shapeClass: `shape-${option.shape}`,
+      previewSrc: SHAPE_PREVIEW_TEXTURE_SOURCE,
+      blockType: option.type,
+    }));
+    const textureOptions = BLOCK_TEXTURE_KEYS.map((textureKey) => ({
+      value: textureKey,
+      label: textureKey,
+      shapeClass: 'shape-cube',
+      previewSrc: resolveTexturePath(textureKey, ''),
+      textureKey,
+    }));
+
+    const initialShape = shapeOptions[0] ? shapeOptions[0].value : 'cube';
+    const initialTexture = textureOptions[0] ? textureOptions[0].value : EDITOR_TEXTURE_MODE_AUTO;
+
+    shapeDropdownApi = createPreviewSelect(shapeSelectHost, shapeOptions, initialShape, (shapeId) => {
+      const selected = shapeOptions.find((option) => option.value === shapeId);
+      if (!selected) {
+        return;
+      }
+      editor.setType(selected.blockType || DEFAULT_BLOCK_ID);
+    });
+    textureDropdownApi = createPreviewSelect(textureSelectHost, textureOptions, initialTexture, (textureKey) => {
+      editor.setTextureKey(normalizeEditorTextureKey(textureKey));
+    });
+
     populateLevelSelect();
     if (levelSelect) {
       levelSelect.value = activeLevelId;
     }
     syncLevelNameInput();
-    blockSelect.value = blockSelect.value || DEFAULT_BLOCK_ID;
-    editor.setType(blockSelect.value);
-    editor.setLayer(Number(layerInput.value));
+    const selectedShapeOption = shapeOptions.find((option) => option.value === shapeDropdownApi.getValue()) || shapeOptions[0];
+    editor.setType(selectedShapeOption ? selectedShapeOption.blockType : DEFAULT_BLOCK_ID);
+    const selectedTextureOption = textureOptions.find((option) => option.value === textureDropdownApi.getValue()) || null;
+    editor.setTextureKey(selectedTextureOption ? selectedTextureOption.textureKey : EDITOR_TEXTURE_MODE_AUTO);
+    if (blockRotYSelect) {
+      blockRotYSelect.value = '0';
+      editor.setRotationDeg(0);
+    }
+    editor.setLayer(0);
     railEditor.setType(railTypeSelect.value);
     railEditor.setRotationDeg(Number(railRotSelect.value));
     if (railRingSizeSelect) {

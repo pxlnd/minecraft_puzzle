@@ -34,13 +34,22 @@
 
       <details class="debug-group" open>
         <summary>Blocks</summary>
+        <div class="debug-preview-field">
+          <span class="debug-preview-label">Shape</span>
+          <div id="editor-shape-select" class="debug-preview-select"></div>
+        </div>
+        <div class="debug-preview-field">
+          <span class="debug-preview-label">Texture</span>
+          <div id="editor-texture-select" class="debug-preview-select"></div>
+        </div>
         <label class="debug-row">
-          <span>Block</span>
-          <select id="editor-block"></select>
-        </label>
-        <label class="debug-row">
-          <span>Layer Y</span>
-          <input id="editor-layer" type="number" min="0" max="8" value="0" />
+          <span>Rotate Y</span>
+          <select id="editor-rot-y">
+            <option value="0">0°</option>
+            <option value="90">90°</option>
+            <option value="180">180°</option>
+            <option value="270">270°</option>
+          </select>
         </label>
         <div class="debug-actions">
           <button id="editor-clear-building" type="button">Clear Building</button>

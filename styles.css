@@ -89,6 +89,159 @@ body {
   justify-self: start;
 }
 
+.debug-preview-field {
+  display: grid;
+  gap: 6px;
+}
+
+.debug-preview-label {
+  font-size: 12px;
+  color: #f6e3ce;
+}
+
+.debug-preview-select {
+  position: relative;
+}
+
+.debug-preview-toggle {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(226, 192, 150, 0.6);
+  color: #f8ecdf;
+  border-radius: 8px;
+  padding: 5px 7px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.debug-preview-toggle .debug-preview-caret {
+  opacity: 0.8;
+}
+
+.debug-preview-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 25;
+  display: none;
+  max-height: 220px;
+  overflow-y: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(226, 192, 150, 0.55);
+  background: rgba(38, 28, 20, 0.98);
+  padding: 4px;
+  gap: 4px;
+}
+
+.debug-preview-select.is-open .debug-preview-menu {
+  display: grid;
+}
+
+.debug-preview-option {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(226, 192, 150, 0.3);
+  border-radius: 7px;
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #f8ecdf;
+  cursor: pointer;
+  text-align: left;
+}
+
+.debug-preview-option:hover {
+  border-color: rgba(255, 216, 171, 0.8);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.debug-preview-option.is-active {
+  border-color: #f6c285;
+  background: rgba(246, 194, 133, 0.18);
+}
+
+.debug-preview-thumb {
+  width: 22px;
+  height: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.16);
+  background-size: cover;
+  background-position: center;
+  image-rendering: pixelated;
+  position: relative;
+  overflow: hidden;
+}
+
+.debug-preview-thumb.shape-cube::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.debug-preview-thumb.shape-slab::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  bottom: 3px;
+  height: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  background: inherit;
+}
+
+.debug-preview-thumb.shape-pillar::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 7px;
+  width: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  background: inherit;
+}
+
+.debug-preview-thumb.shape-stairs::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  bottom: 3px;
+  height: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  background: inherit;
+}
+
+.debug-preview-thumb.shape-stairs::after {
+  content: "";
+  position: absolute;
+  right: 2px;
+  bottom: 11px;
+  width: 9px;
+  height: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  background: inherit;
+}
+
+.debug-preview-thumb.shape-door::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  left: 6px;
+  width: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  background: inherit;
+}
+
 .debug-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -129,6 +282,23 @@ body {
 
   .debug-group {
     padding: 5px;
+  }
+
+  .debug-preview-toggle {
+    grid-template-columns: 24px 1fr auto;
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .debug-preview-option {
+    grid-template-columns: 24px 1fr;
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .debug-preview-thumb {
+    width: 20px;
+    height: 20px;
   }
 
   .debug-actions button {
