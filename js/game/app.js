@@ -2476,6 +2476,8 @@
       this.minZ = options.minZ;
       this.maxZ = options.maxZ;
       this.createMaterial = options.createMaterial;
+      this.onChange = options.onChange || null;
+      this.suspendChangeEvents = 0;
 
       this.enabled = false;
       this.selectedType = DEFAULT_BLOCK_ID;
@@ -2509,6 +2511,15 @@
       );
       this.hoverMesh.visible = false;
       this.scene.add(this.hoverMesh);
+    }
+
+    notifyChange() {
+      if (this.suspendChangeEvents > 0) {
+        return;
+      }
+      if (this.onChange) {
+        this.onChange();
+      }
     }
 
     createGrid() {
@@ -2715,6 +2726,7 @@
           this.group.remove(existing.mesh);
           disposeObject3D(existing.mesh);
           this.cells.delete(this.getCellKey(existing.x, existing.y, existing.z));
+          this.notifyChange();
         }
         return;
       }
@@ -2744,6 +2756,7 @@
       mesh.receiveShadow = true;
       this.group.add(mesh);
       this.cells.set(targetKey, { type: this.selectedType, x, y: targetY, z, mesh });
+      this.notifyChange();
     }
 
     placeBlock(type, x, y, z) {
@@ -2771,12 +2784,15 @@
       this.cells.set(key, { type, x, y, z, mesh });
     }
 
-    clear() {
+    clear(shouldNotify = true) {
       for (const entry of this.cells.values()) {
         this.group.remove(entry.mesh);
         disposeObject3D(entry.mesh);
       }
       this.cells.clear();
+      if (shouldNotify) {
+        this.notifyChange();
+      }
     }
 
     exportJSON() {
@@ -2787,11 +2803,14 @@
     }
 
     loadJSON(data) {
-      this.clear();
+      this.suspendChangeEvents += 1;
+      this.clear(false);
       const list = data && Array.isArray(data.blocks) ? data.blocks : [];
       for (const block of list) {
         this.placeBlock(block.type || DEFAULT_BLOCK_ID, Number(block.x), Number(block.y), Number(block.z));
       }
+      this.suspendChangeEvents = Math.max(0, this.suspendChangeEvents - 1);
+      this.notifyChange();
     }
   }
 
@@ -2867,61 +2886,57 @@
   editor.loadJSON(DEFAULT_EDITOR_LEVEL);
   const SCENE_STORAGE_KEY = 'minecraft_puzzle:scene_layout_v2';
   const LEGACY_RAILS_STORAGE_KEYS = ['prototype:rails_layout_v2', 'prototype:rails_layout_v1'];
-  const DEFAULT_USER_RAILS = [
-    { type: 'corner', x: -7, z: -5, yaw: 3.141592653589793 },
-    { type: 'straight', x: -6, z: -5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: -5, z: -5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: -4, z: -5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: -3, z: -5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: -2, z: -5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: -1, z: -5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: 0, z: -5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: 1, z: -5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: 2, z: -5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: 3, z: -5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: 4, z: -5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: 5, z: -5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: 6, z: -5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: 7, z: -5, yaw: 1.5707963267948966 },
-    { type: 'corner', x: 8, z: -5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: -7, z: -4, yaw: 0 },
-    { type: 'straight', x: 8, z: -4, yaw: 0 },
-    { type: 'straight', x: -7, z: -3, yaw: 0 },
-    { type: 'straight', x: 8, z: -3, yaw: 0 },
-    { type: 'straight', x: -7, z: -2, yaw: 0 },
-    { type: 'straight', x: 8, z: -2, yaw: 0 },
-    { type: 'straight', x: -7, z: -1, yaw: 0 },
-    { type: 'straight', x: 8, z: -1, yaw: 0 },
-    { type: 'straight', x: -7, z: 0, yaw: 0 },
-    { type: 'straight', x: 8, z: 0, yaw: 0 },
-    { type: 'straight', x: -7, z: 1, yaw: 0 },
-    { type: 'straight', x: 8, z: 1, yaw: 0 },
-    { type: 'straight', x: -7, z: 2, yaw: 0 },
-    { type: 'straight', x: 8, z: 2, yaw: 0 },
-    { type: 'straight', x: -7, z: 3, yaw: 0 },
-    { type: 'straight', x: 8, z: 3, yaw: 0 },
-    { type: 'straight', x: -7, z: 4, yaw: 0 },
-    { type: 'straight', x: 8, z: 4, yaw: 0 },
-    { type: 'corner', x: -7, z: 5, yaw: 4.71238898038469 },
-    { type: 'straight', x: -6, z: 5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: -5, z: 5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: -4, z: 5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: -3, z: 5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: -2, z: 5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: -1, z: 5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: 0, z: 5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: 1, z: 5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: 2, z: 5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: 3, z: 5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: 4, z: 5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: 5, z: 5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: 6, z: 5, yaw: 1.5707963267948966 },
-    { type: 'straight', x: 7, z: 5, yaw: 4.71238898038469 },
-    { type: 'corner', x: 8, z: 5, yaw: 0 },
-  ];
+  const RAIL_LOOP_SIZE_PRESETS = {
+    '12': { minX: -5, maxX: 6, minZ: -3, maxZ: 3 },
+    '14': { minX: -6, maxX: 7, minZ: -4, maxZ: 4 },
+    '16': { minX: -7, maxX: 8, minZ: -5, maxZ: 5 },
+    '18': { minX: -8, maxX: 9, minZ: -6, maxZ: 6 },
+    '20': { minX: -9, maxX: 10, minZ: -7, maxZ: 7 },
+  };
+  let railLoopSize = '16';
 
-  function getDefaultUserRails() {
-    return normalizeRails(DEFAULT_USER_RAILS);
+  function normalizeRailLoopSize(value) {
+    if (value === 'small') {
+      return '14';
+    }
+    if (value === 'large') {
+      return '16';
+    }
+    const normalized = String(value || '').trim();
+    return Object.prototype.hasOwnProperty.call(RAIL_LOOP_SIZE_PRESETS, normalized) ? normalized : '16';
+  }
+
+  function buildRailLoopFromBounds(bounds) {
+    const minX = Math.round(bounds.minX);
+    const maxX = Math.round(bounds.maxX);
+    const minZ = Math.round(bounds.minZ);
+    const maxZ = Math.round(bounds.maxZ);
+    const rails = [];
+
+    rails.push({ type: 'corner', x: minX, z: minZ, yaw: Math.PI });
+    for (let x = minX + 1; x <= maxX - 1; x += 1) {
+      rails.push({ type: 'straight', x, z: minZ, yaw: Math.PI * 0.5 });
+    }
+    rails.push({ type: 'corner', x: maxX, z: minZ, yaw: Math.PI * 0.5 });
+
+    for (let z = minZ + 1; z <= maxZ - 1; z += 1) {
+      rails.push({ type: 'straight', x: minX, z, yaw: 0 });
+      rails.push({ type: 'straight', x: maxX, z, yaw: 0 });
+    }
+
+    rails.push({ type: 'corner', x: minX, z: maxZ, yaw: Math.PI * 1.5 });
+    for (let x = minX + 1; x <= maxX - 1; x += 1) {
+      rails.push({ type: 'straight', x, z: maxZ, yaw: Math.PI * 0.5 });
+    }
+    rails.push({ type: 'corner', x: maxX, z: maxZ, yaw: 0 });
+
+    return rails;
+  }
+
+  function getDefaultUserRails(size) {
+    const normalizedSize = normalizeRailLoopSize(size || railLoopSize);
+    const preset = RAIL_LOOP_SIZE_PRESETS[normalizedSize] || RAIL_LOOP_SIZE_PRESETS['16'];
+    return normalizeRails(buildRailLoopFromBounds(preset));
   }
   const debugEditor = document.getElementById('debug-editor');
   let uiHidden = false;
@@ -3171,13 +3186,43 @@
     }
   }
 
+  function getBuildSettingsSnapshot() {
+    return {
+      targetBlocks: getEditorBlocksSnapshot(),
+    };
+  }
+
+  function resolveBuildTargetBlocks(raw) {
+    if (!raw || typeof raw !== 'object') {
+      return [];
+    }
+    if (raw.build && Array.isArray(raw.build.targetBlocks)) {
+      return normalizeBlocks(raw.build.targetBlocks);
+    }
+    return normalizeBlocks(raw.blocks);
+  }
+
+  function handleEditorBlocksChange() {
+    const targetBlocks = getEditorBlocksSnapshot();
+    buildManager.loadFromLevel({ blocks: targetBlocks });
+    if (typeof syncBlockCountsFromLevel === 'function') {
+      syncBlockCountsFromLevel();
+    }
+    if (typeof refreshUiLockState === 'function') {
+      refreshUiLockState();
+    }
+    saveSceneLayout();
+  }
+
   function getCurrentSceneSnapshot() {
     const currentRails = normalizeRails(railEditor.exportData());
     const safeRails = currentRails.length > 0 ? currentRails : getDefaultUserRails();
     return {
-      version: 3,
+      version: 4,
       levelId: activeLevelId,
       blocks: getEditorBlocksSnapshot(),
+      build: getBuildSettingsSnapshot(),
+      railLoopSize: normalizeRailLoopSize(railLoopSize),
       rails: safeRails,
       minecart: {
         speed: minecart.getSpeed(),
@@ -3204,7 +3249,7 @@
   }
 
   function loadDefaultRails() {
-    const rails = getDefaultUserRails();
+    const rails = getDefaultUserRails(railLoopSize);
     railEditor.loadData(rails.length > 0 ? rails : DEFAULT_RAILS_LAYOUT);
     trackController.setRailLayout(railEditor.exportData());
     saveSceneLayout();
@@ -3528,14 +3573,28 @@
       return null;
     }
     const levelData = cloneLevelData(LEVELS_BY_ID.get(raw.levelId) || INITIAL_LEVEL_DATA);
+    const hasBlocksField = Object.prototype.hasOwnProperty.call(raw, 'blocks');
+    const hasBuildTargetField = Boolean(
+      raw.build
+      && typeof raw.build === 'object'
+      && Object.prototype.hasOwnProperty.call(raw.build, 'targetBlocks'),
+    );
     const blocks = normalizeBlocks(raw.blocks);
+    const buildTargetBlocks = resolveBuildTargetBlocks(raw);
+    const snapshotRailLoopSize = normalizeRailLoopSize(raw.railLoopSize);
     const rails = normalizeRails(raw.rails);
     const speed = Number(raw.minecart && raw.minecart.speed);
     const cameraSettings = normalizeCameraSettings(raw.camera);
+    const effectiveBlocks = hasBlocksField ? blocks : normalizeBlocks(levelData.blocks);
+    const effectiveBuildTargetBlocks = hasBuildTargetField
+      ? buildTargetBlocks
+      : (hasBlocksField ? blocks : normalizeBlocks(levelData.blocks));
     return {
       levelId: levelData.id,
-      blocks: blocks.length > 0 ? blocks : normalizeBlocks(levelData.blocks),
-      rails: rails.length > 0 ? rails : (normalizeRails(levelData.rails).length > 0 ? normalizeRails(levelData.rails) : getDefaultUserRails()),
+      blocks: effectiveBlocks,
+      buildTargetBlocks: effectiveBuildTargetBlocks,
+      railLoopSize: snapshotRailLoopSize,
+      rails: rails.length > 0 ? rails : (normalizeRails(levelData.rails).length > 0 ? normalizeRails(levelData.rails) : getDefaultUserRails(snapshotRailLoopSize)),
       minecartSpeed: Number.isFinite(speed) && speed > 0 ? speed : levelData.minecartSpeed,
       camera: cameraSettings || normalizeCameraSettings(levelData.camera),
     };
@@ -3588,12 +3647,13 @@
           return false;
         }
         activeLevelId = normalized.levelId;
+        railLoopSize = normalized.railLoopSize;
         const sceneData = {
           blocks: normalized.blocks,
           rails: normalized.rails,
         };
         editor.loadJSON(sceneData);
-        buildManager.loadFromLevel(sceneData);
+        buildManager.loadFromLevel({ blocks: normalized.buildTargetBlocks });
         railEditor.loadData(sceneData.rails);
         trackController.setRailLayout(railEditor.exportData());
         minecart.setSpeed(normalized.minecartSpeed);
@@ -3652,7 +3712,7 @@
       rails: levelRails.length > 0 ? levelRails : getDefaultUserRails(),
     };
     editor.loadJSON(sceneData);
-    buildManager.loadFromLevel(sceneData);
+    buildManager.loadFromLevel({ blocks: normalizeBlocks(levelData.blocks) });
     railEditor.loadData(sceneData.rails);
     trackController.setRailLayout(railEditor.exportData());
     minecart.setSpeed(levelData.minecartSpeed);
@@ -3759,17 +3819,17 @@
     const levelOpenFileBtn = document.getElementById('level-open-file');
     const levelFileInput = document.getElementById('level-file-input');
     const layerInput = document.getElementById('editor-layer');
-    const clearBtn = document.getElementById('editor-clear');
+    const clearBuildingBtn = document.getElementById('editor-clear-building');
     const railEnabledInput = document.getElementById('rail-enabled');
     const railTypeSelect = document.getElementById('rail-type');
     const railRotSelect = document.getElementById('rail-rot');
+    const railRingSizeSelect = document.getElementById('rail-ring-size');
     const minecartSpeedInput = document.getElementById('minecart-speed');
     const railClearBtn = document.getElementById('rail-clear');
     const railAutoBtn = document.getElementById('rail-auto');
     const sceneExportFileBtn = document.getElementById('scene-export-file');
     const sceneImportFileBtn = document.getElementById('scene-import-file');
     const sceneFileInput = document.getElementById('scene-file-input');
-    const applyBtn = document.getElementById('editor-apply');
     const cameraFlyEnabledInput = document.getElementById('cam-fly-enabled');
     const cameraLookAtEnabledInput = document.getElementById('cam-lookat-enabled');
     const cameraPosXInput = document.getElementById('cam-pos-x');
@@ -3875,10 +3935,10 @@
 
       const sceneData = {
         blocks: normalizeBlocks(levelData.blocks),
-        rails: levelRails.length > 0 ? levelRails : getDefaultUserRails(),
+        rails: levelRails.length > 0 ? levelRails : getDefaultUserRails(railLoopSize),
       };
       editor.loadJSON(sceneData);
-      buildManager.loadFromLevel(sceneData);
+      buildManager.loadFromLevel({ blocks: sceneData.blocks });
       railEditor.loadData(sceneData.rails);
       trackController.setRailLayout(railEditor.exportData());
       minecart.setSpeed(levelData.minecartSpeed);
@@ -3912,8 +3972,12 @@
         blocks: normalized.blocks,
         rails: normalized.rails,
       };
+      railLoopSize = normalized.railLoopSize;
+      if (railRingSizeSelect) {
+        railRingSizeSelect.value = railLoopSize;
+      }
       editor.loadJSON(sceneData);
-      buildManager.loadFromLevel(sceneData);
+      buildManager.loadFromLevel({ blocks: normalized.buildTargetBlocks });
       railEditor.loadData(sceneData.rails);
       trackController.setRailLayout(railEditor.exportData());
       minecart.setSpeed(normalized.minecartSpeed);
@@ -4020,11 +4084,16 @@
       editor.setLayer(Number(layerInput.value));
       layerInput.value = String(editor.layer);
     });
+    if (clearBuildingBtn) {
+      clearBuildingBtn.addEventListener('click', () => {
+        if (activeBlockId !== null) {
+          window.alert('Finish active block cycle first, then clear building.');
+          return;
+        }
+        editor.clear();
+      });
+    }
 
-    clearBtn.addEventListener('click', () => {
-      editor.clear();
-      saveSceneLayout();
-    });
     railEnabledInput.addEventListener('change', () => {
       railEditor.setEnabled(railEnabledInput.checked);
     });
@@ -4034,6 +4103,13 @@
     railRotSelect.addEventListener('change', () => {
       railEditor.setRotationDeg(Number(railRotSelect.value));
     });
+    if (railRingSizeSelect) {
+      railRingSizeSelect.addEventListener('change', () => {
+        railLoopSize = normalizeRailLoopSize(railRingSizeSelect.value);
+        railRingSizeSelect.value = railLoopSize;
+        saveSceneLayout();
+      });
+    }
     minecartSpeedInput.addEventListener('change', () => {
       const speed = Number(minecartSpeedInput.value);
       minecart.setSpeed(speed);
@@ -4087,19 +4163,6 @@
       });
     }
 
-    applyBtn.addEventListener('click', () => {
-      if (activeBlockId !== null) {
-        return;
-      }
-      const data = {
-        blocks: JSON.parse(editor.exportJSON()).blocks || [],
-        rails: railEditor.exportData(),
-      };
-      buildManager.loadFromLevel(data);
-      syncBlockCountsFromLevel();
-      refreshUiLockState();
-      saveSceneLayout();
-    });
     cameraFlyEnabledInput.addEventListener('change', () => {
       setFlyCamEnabled(cameraFlyEnabledInput.checked);
       setCameraInputsFromState();
@@ -4143,6 +4206,9 @@
     editor.setLayer(Number(layerInput.value));
     railEditor.setType(railTypeSelect.value);
     railEditor.setRotationDeg(Number(railRotSelect.value));
+    if (railRingSizeSelect) {
+      railRingSizeSelect.value = railLoopSize;
+    }
     minecartSpeedInput.value = String(minecart.getSpeed());
     syncCameraInputsFromState = setCameraInputsFromState;
     setCameraInputsFromState();
@@ -4298,6 +4364,7 @@
   });
 
   refreshUiLockState();
+  editor.onChange = handleEditorBlocksChange;
   applyUiVisibility();
   bindDebugEditorUI();
   animate();
