@@ -74,14 +74,36 @@
     grass: loadTexture(TEXTURE_DATA.grass || './assets/grass.png', { pixelated: true }),
     door: loadTexture(TEXTURE_DATA.door || './assets/block/minecraft_oak_door_item.png', { pixelated: true }),
   };
+  const DOOR_TEXTURES = {
+    top: loadTexture(
+      TEXTURE_DATA.doorTop || TEXTURE_DATA.door || './assets/oak_door_top.png',
+      { pixelated: true },
+    ),
+    bottom: loadTexture(
+      TEXTURE_DATA.doorBottom || TEXTURE_DATA.door || './assets/oak_door_bottom.png',
+      { pixelated: true },
+    ),
+  };
   const DOOR_MODEL_PATH = './assets/minecraft_door.glb';
-  const ENABLE_DOOR_GLB = false;
+  const ENABLE_DOOR_GLB = true;
   const DOOR_MODEL_STATE = {
     template: null,
     unitHeight: 1,
     loading: false,
     failed: false,
   };
+
+  function createOpaqueDoorMaterial(texture) {
+    return new THREE.MeshStandardMaterial({
+      map: texture || null,
+      color: 0xd2a36f,
+      roughness: 0.88,
+      metalness: 0.04,
+      transparent: false,
+      alphaTest: 0.2,
+      side: THREE.DoubleSide,
+    });
+  }
 
   function disposeObject3D(root) {
     if (!root) {
@@ -150,8 +172,13 @@
         template.position.y += -0.5 - normalizedBox.min.y;
         template.updateMatrixWorld(true);
 
+        const midY = (normalizedBox.min.y + normalizedBox.max.y) * 0.5;
         template.traverse((node) => {
           if (node.isMesh) {
+            const nodeBox = new THREE.Box3().setFromObject(node);
+            const centerY = nodeBox.isEmpty() ? 0 : (nodeBox.min.y + nodeBox.max.y) * 0.5;
+            const texture = centerY >= midY ? DOOR_TEXTURES.top : DOOR_TEXTURES.bottom;
+            node.material = createOpaqueDoorMaterial(texture);
             node.castShadow = true;
             node.receiveShadow = true;
           }
@@ -1779,10 +1806,43 @@
       color: map ? 0xffffff : color,
       roughness: type === 'wood' || isDoor ? 0.9 : 0.78,
       metalness: type === 'stone' ? 0.12 : 0.04,
-      transparent: isDoor,
-      alphaTest: isDoor ? 0.08 : 0,
+      transparent: false,
+      alphaTest: 0,
       side: isDoor ? THREE.DoubleSide : THREE.FrontSide,
     });
+  }
+
+  function ensureDoorShowcaseNearMinecart(scene, minecart) {
+    if (!scene || !minecart) {
+      return null;
+    }
+    const existing = scene.getObjectByName('door-showcase-near-minecart');
+    if (existing) {
+      return existing;
+    }
+    const mesh = createDoorModelMesh(1.25, 'placed');
+    if (!mesh) {
+      return null;
+    }
+
+    const cartPos = minecart.group.position.clone();
+    const forward = minecart.getForward(new THREE.Vector3());
+    forward.y = 0;
+    if (forward.lengthSq() < 1e-6) {
+      forward.set(0, 0, 1);
+    } else {
+      forward.normalize();
+    }
+    const side = new THREE.Vector3(forward.z, 0, -forward.x).normalize();
+
+    mesh.name = 'door-showcase-near-minecart';
+    mesh.position.copy(cartPos)
+      .add(side.multiplyScalar(1.7))
+      .add(forward.multiplyScalar(-0.3));
+    mesh.position.y = 1.0;
+    mesh.rotation.y = Math.atan2(forward.x, forward.z);
+    scene.add(mesh);
+    return mesh;
   }
 
   class BlockController {
@@ -3025,7 +3085,30 @@
     buildManager.loadFromLevel(DEFAULT_EDITOR_LEVEL);
     loadDefaultRails();
   }
+
+  function removeDoorsFromField() {
+    const exported = JSON.parse(editor.exportJSON());
+    const blocks = Array.isArray(exported.blocks) ? exported.blocks : [];
+    const filteredBlocks = blocks.filter((block) => block && block.type !== 'door');
+    if (filteredBlocks.length === blocks.length) {
+      return false;
+    }
+
+    const sceneData = {
+      blocks: filteredBlocks,
+      rails: railEditor.exportData(),
+    };
+    editor.loadJSON(sceneData);
+    buildManager.loadFromLevel(sceneData);
+    trackController.setRailLayout(sceneData.rails);
+    saveSceneLayout();
+    return true;
+  }
+
+  removeDoorsFromField();
   minecart.snapToNearestPoint(new THREE.Vector3(9.8, trackController.pathY, 0));
+  ensureDoorModelLoading();
+  ensureDoorShowcaseNearMinecart(scene, minecart);
 
   let activeBlockId = null;
 
@@ -3319,6 +3402,7 @@
   function step(dt) {
     updateFlyCamera(dt);
     minecart.update(dt);
+    ensureDoorShowcaseNearMinecart(scene, minecart);
     for (const controller of blocks.values()) {
       controller.update(dt);
     }
