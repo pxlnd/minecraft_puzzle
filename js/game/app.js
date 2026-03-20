@@ -1716,6 +1716,7 @@
       this.selectedType = 'straight';
       this.selectedYaw = 0;
       this.cells = new Map();
+      this.suspendChangeEvents = 0;
       this.group = new THREE.Group();
       this.scene.add(this.group);
 
@@ -1727,6 +1728,13 @@
         straight: createRailTileMaterial(RAIL_TEXTURES.straight),
         corner: createRailTileMaterial(RAIL_TEXTURES.corner),
       };
+    }
+
+    notifyChange() {
+      if (this.suspendChangeEvents > 0) {
+        return;
+      }
+      if (this.onChange) this.onChange();
     }
 
     setEnabled(value) {
@@ -1782,7 +1790,7 @@
       if (!existing) return;
       this.group.remove(existing.mesh);
       this.cells.delete(key);
-      if (this.onChange) this.onChange();
+      this.notifyChange();
     }
 
     clear() {
@@ -1790,7 +1798,7 @@
         this.group.remove(item.mesh);
       }
       this.cells.clear();
-      if (this.onChange) this.onChange();
+      this.notifyChange();
     }
 
     placeRail(type, x, z, yaw) {
@@ -1812,7 +1820,7 @@
       mesh.castShadow = false;
       this.group.add(mesh);
       this.cells.set(key, { mesh, type: safeType, x, z, yaw: safeYaw });
-      if (this.onChange) this.onChange();
+      this.notifyChange();
     }
 
     exportData() {
@@ -1822,18 +1830,23 @@
     }
 
     loadData(data) {
-      this.clear();
-      const list = Array.isArray(data) ? data : [];
-      for (const item of list) {
-        const x = Number(item.x);
-        const z = Number(item.z);
-        const yaw = Number(item.yaw);
-        if (!Number.isFinite(x) || !Number.isFinite(z)) {
-          continue;
+      this.suspendChangeEvents += 1;
+      try {
+        this.clear();
+        const list = Array.isArray(data) ? data : [];
+        for (const item of list) {
+          const x = Number(item.x);
+          const z = Number(item.z);
+          const yaw = Number(item.yaw);
+          if (!Number.isFinite(x) || !Number.isFinite(z)) {
+            continue;
+          }
+          this.placeRail(item.type, Math.round(x), Math.round(z), Number.isFinite(yaw) ? yaw : 0);
         }
-        this.placeRail(item.type, Math.round(x), Math.round(z), Number.isFinite(yaw) ? yaw : 0);
+      } finally {
+        this.suspendChangeEvents = Math.max(0, this.suspendChangeEvents - 1);
       }
-      if (this.onChange) this.onChange();
+      this.notifyChange();
     }
   }
 
@@ -2854,6 +2867,62 @@
   editor.loadJSON(DEFAULT_EDITOR_LEVEL);
   const SCENE_STORAGE_KEY = 'minecraft_puzzle:scene_layout_v2';
   const LEGACY_RAILS_STORAGE_KEYS = ['prototype:rails_layout_v2', 'prototype:rails_layout_v1'];
+  const DEFAULT_USER_RAILS = [
+    { type: 'corner', x: -7, z: -5, yaw: 3.141592653589793 },
+    { type: 'straight', x: -6, z: -5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: -5, z: -5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: -4, z: -5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: -3, z: -5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: -2, z: -5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: -1, z: -5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: 0, z: -5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: 1, z: -5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: 2, z: -5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: 3, z: -5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: 4, z: -5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: 5, z: -5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: 6, z: -5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: 7, z: -5, yaw: 1.5707963267948966 },
+    { type: 'corner', x: 8, z: -5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: -7, z: -4, yaw: 0 },
+    { type: 'straight', x: 8, z: -4, yaw: 0 },
+    { type: 'straight', x: -7, z: -3, yaw: 0 },
+    { type: 'straight', x: 8, z: -3, yaw: 0 },
+    { type: 'straight', x: -7, z: -2, yaw: 0 },
+    { type: 'straight', x: 8, z: -2, yaw: 0 },
+    { type: 'straight', x: -7, z: -1, yaw: 0 },
+    { type: 'straight', x: 8, z: -1, yaw: 0 },
+    { type: 'straight', x: -7, z: 0, yaw: 0 },
+    { type: 'straight', x: 8, z: 0, yaw: 0 },
+    { type: 'straight', x: -7, z: 1, yaw: 0 },
+    { type: 'straight', x: 8, z: 1, yaw: 0 },
+    { type: 'straight', x: -7, z: 2, yaw: 0 },
+    { type: 'straight', x: 8, z: 2, yaw: 0 },
+    { type: 'straight', x: -7, z: 3, yaw: 0 },
+    { type: 'straight', x: 8, z: 3, yaw: 0 },
+    { type: 'straight', x: -7, z: 4, yaw: 0 },
+    { type: 'straight', x: 8, z: 4, yaw: 0 },
+    { type: 'corner', x: -7, z: 5, yaw: 4.71238898038469 },
+    { type: 'straight', x: -6, z: 5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: -5, z: 5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: -4, z: 5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: -3, z: 5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: -2, z: 5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: -1, z: 5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: 0, z: 5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: 1, z: 5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: 2, z: 5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: 3, z: 5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: 4, z: 5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: 5, z: 5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: 6, z: 5, yaw: 1.5707963267948966 },
+    { type: 'straight', x: 7, z: 5, yaw: 4.71238898038469 },
+    { type: 'corner', x: 8, z: 5, yaw: 0 },
+  ];
+
+  function getDefaultUserRails() {
+    return normalizeRails(DEFAULT_USER_RAILS);
+  }
   const debugEditor = document.getElementById('debug-editor');
   let uiHidden = false;
   let flyCamEnabled = false;
@@ -2878,9 +2947,9 @@
     useLookAt: true,
     position: { x: 50.1, y: 53.9, z: 0 },
     rotationDeg: {
-      x: -90.00000000000003,
-      y: 42.13759477388825,
-      z: 90.00000000000003,
+      x: -47.862405226111754,
+      y: 90.00000000000003,
+      z: -9.481268497239976e-15,
     },
     target: { x: 0.7, y: -0.7, z: 0 },
     fov: 15,
@@ -3102,19 +3171,24 @@
     }
   }
 
+  function getCurrentSceneSnapshot() {
+    const currentRails = normalizeRails(railEditor.exportData());
+    const safeRails = currentRails.length > 0 ? currentRails : getDefaultUserRails();
+    return {
+      version: 3,
+      levelId: activeLevelId,
+      blocks: getEditorBlocksSnapshot(),
+      rails: safeRails,
+      minecart: {
+        speed: minecart.getSpeed(),
+      },
+      camera: exportCameraDebugState(),
+    };
+  }
+
   function saveSceneLayout() {
     try {
-      const snapshot = {
-        version: 2,
-        levelId: activeLevelId,
-        blocks: getEditorBlocksSnapshot(),
-        rails: railEditor.exportData(),
-        minecart: {
-          speed: minecart.getSpeed(),
-        },
-        camera: exportCameraDebugState(),
-      };
-      localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(snapshot));
+      localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(getCurrentSceneSnapshot()));
     } catch (error) {
       console.warn('Failed to save scene to localStorage', error);
     }
@@ -3126,15 +3200,11 @@
   }
 
   function autoPlaceRails() {
-    const autoRails = buildRailLayoutFromCurve(trackController.defaultCurve);
-    railEditor.loadData(autoRails);
-    trackController.setRailLayout(railEditor.exportData());
-    saveSceneLayout();
+    loadDefaultRails();
   }
 
   function loadDefaultRails() {
-    const levelData = cloneLevelData(LEVELS_BY_ID.get(activeLevelId) || FALLBACK_LEVEL_DEF);
-    const rails = normalizeRails(levelData.rails);
+    const rails = getDefaultUserRails();
     railEditor.loadData(rails.length > 0 ? rails : DEFAULT_RAILS_LAYOUT);
     trackController.setRailLayout(railEditor.exportData());
     saveSceneLayout();
@@ -3226,54 +3296,6 @@
     return normalized;
   }
 
-  function centerBlocksInEditorBounds(blocksList, editorRef) {
-    const blocks = normalizeBlocks(blocksList);
-    if (blocks.length === 0) {
-      return [];
-    }
-
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minZ = Infinity;
-    let maxZ = -Infinity;
-    for (const block of blocks) {
-      minX = Math.min(minX, block.x);
-      maxX = Math.max(maxX, block.x);
-      minZ = Math.min(minZ, block.z);
-      maxZ = Math.max(maxZ, block.z);
-    }
-
-    const srcCenterX = (minX + maxX) * 0.5;
-    const srcCenterZ = (minZ + maxZ) * 0.5;
-    const dstCenterX = (editorRef.minX + editorRef.maxX) * 0.5;
-    const dstCenterZ = (editorRef.minZ + editorRef.maxZ) * 0.5;
-    const shiftX = Math.round(dstCenterX - srcCenterX);
-    const shiftZ = Math.round(dstCenterZ - srcCenterZ);
-
-    const centered = [];
-    const used = new Set();
-    for (const block of blocks) {
-      const x = block.x + shiftX;
-      const z = block.z + shiftZ;
-      if (x < editorRef.minX || x > editorRef.maxX || z < editorRef.minZ || z > editorRef.maxZ) {
-        continue;
-      }
-      const key = `${x}:${block.y}:${z}`;
-      if (used.has(key)) {
-        continue;
-      }
-      used.add(key);
-      centered.push({
-        type: block.type,
-        x,
-        y: block.y,
-        z,
-      });
-    }
-
-    return centered;
-  }
-
   function stripCodeFences(raw) {
     const text = String(raw || '')
       .replace(/^\uFEFF/, '')
@@ -3325,19 +3347,21 @@
     if (!payload) {
       throw new Error('Empty payload');
     }
+    // Recover common copy/paste corruption like: 1.5707...5707963267948966
+    const sanitizedPayload = payload.replace(/(-?\d+(?:\.\d+)?)\s*\.\.\.\s*-?\d+(?:\.\d+)?/g, '$1');
 
     try {
-      return JSON.parse(payload);
+      return JSON.parse(sanitizedPayload);
     } catch (_errorA) {
       try {
         // JS-like object fallback: unquoted keys + single quotes.
-        const withQuotedKeys = payload.replace(/([{,]\s*)([A-Za-z_$][\w$-]*)(\s*:)/g, '$1"$2"$3');
+        const withQuotedKeys = sanitizedPayload.replace(/([{,]\s*)([A-Za-z_$][\w$-]*)(\s*:)/g, '$1"$2"$3');
         const relaxed = withQuotedKeys.replace(/'/g, '"');
         return JSON.parse(relaxed);
       } catch (_errorB) {
         try {
           // JSONC/JS-ish fallback: comments + trailing commas.
-          const noComments = payload
+          const noComments = sanitizedPayload
             .replace(/\/\*[\s\S]*?\*\//g, '')
             .replace(/^\s*\/\/.*$/gm, '');
           const noTrailingCommas = noComments.replace(/,\s*([}\]])/g, '$1');
@@ -3345,39 +3369,13 @@
         } catch (_errorC) {
           try {
             // Final fallback for JS literal objects/arrays.
-            return Function(`"use strict"; return (${payload});`)();
+            return Function(`"use strict"; return (${sanitizedPayload});`)();
           } catch (_errorD) {
             throw new Error('Unsupported JSON format');
           }
         }
       }
     }
-  }
-
-  function extractRailsFromArbitraryText(raw) {
-    const text = String(raw || '');
-    const chunks = text.match(/\{[^{}]*\}/g) || [];
-    const rails = [];
-    for (const chunk of chunks) {
-      const typeMatch = chunk.match(/\btype\b\s*[:=]\s*["']?(straight|corner)["']?/i);
-      const xMatch = chunk.match(/\bx\b\s*[:=]\s*(-?\d+(?:\.\d+)?)/i);
-      const zMatch = chunk.match(/\bz\b\s*[:=]\s*(-?\d+(?:\.\d+)?)/i);
-      const yawMatch = chunk.match(/\b(?:yaw|rotation|rot)\b\s*[:=]\s*(-?\d+(?:\.\d+)?)/i);
-      if (!typeMatch || !xMatch || !zMatch) {
-        continue;
-      }
-      const type = String(typeMatch[1]).toLowerCase();
-      if (type !== 'straight' && type !== 'corner') {
-        continue;
-      }
-      rails.push({
-        type,
-        x: Number(xMatch[1]),
-        z: Number(zMatch[1]),
-        yaw: yawMatch ? Number(yawMatch[1]) : 0,
-      });
-    }
-    return normalizeRails(rails);
   }
 
   function pickRailsPayload(parsed) {
@@ -3412,40 +3410,196 @@
     return null;
   }
 
+  function toSlug(value, fallback) {
+    const safe = String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return safe || fallback;
+  }
+
+  function makeTimestampTag() {
+    const date = new Date();
+    const pad2 = (v) => String(v).padStart(2, '0');
+    return `${date.getFullYear()}${pad2(date.getMonth() + 1)}${pad2(date.getDate())}_${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}`;
+  }
+
+  function triggerTextDownload(filename, content, mime) {
+    const blob = new Blob([content], { type: mime || 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function saveTextToFile(filename, content, mime, extensions) {
+    if (typeof window.showSaveFilePicker === 'function') {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: filename,
+          types: [{
+            description: 'Minecraft Puzzle Data',
+            accept: {
+              [mime || 'text/plain']: extensions && extensions.length > 0 ? extensions : ['.txt'],
+            },
+          }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(content);
+        await writable.close();
+        return;
+      } catch (error) {
+        if (error && error.name === 'AbortError') {
+          return;
+        }
+        console.warn('showSaveFilePicker failed, fallback to download', error);
+      }
+    }
+    triggerTextDownload(filename, content, mime);
+  }
+
+  function tryExtractRegisterCallPayload(raw) {
+    const text = String(raw || '');
+    const marker = 'registerMinecraftLevel(';
+    const markerIndex = text.indexOf(marker);
+    if (markerIndex < 0) {
+      return '';
+    }
+    const start = markerIndex + marker.length;
+    let depth = 0;
+    let inString = false;
+    let quote = '';
+    let escaped = false;
+    for (let i = start; i < text.length; i += 1) {
+      const ch = text[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (ch === '\\') {
+          escaped = true;
+          continue;
+        }
+        if (ch === quote) {
+          inString = false;
+          quote = '';
+        }
+        continue;
+      }
+      if (ch === '"' || ch === "'" || ch === '`') {
+        inString = true;
+        quote = ch;
+        continue;
+      }
+      if (ch === '(' || ch === '{' || ch === '[') {
+        depth += 1;
+        continue;
+      }
+      if (ch === ')' || ch === '}' || ch === ']') {
+        if (depth === 0 && ch === ')') {
+          return text.slice(start, i).trim();
+        }
+        depth = Math.max(0, depth - 1);
+      }
+    }
+    return '';
+  }
+
+  function parseLevelFileData(raw) {
+    const registerPayload = tryExtractRegisterCallPayload(raw);
+    if (registerPayload) {
+      return parseJsonLoose(registerPayload);
+    }
+    const exportDefault = String(raw || '').match(/export\s+default\s+([\s\S]+?)\s*;?\s*$/);
+    if (exportDefault && exportDefault[1]) {
+      return parseJsonLoose(exportDefault[1]);
+    }
+    return parseJsonLoose(raw);
+  }
+
+  function normalizeSceneSnapshotPayload(raw) {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+    const levelData = cloneLevelData(LEVELS_BY_ID.get(raw.levelId) || INITIAL_LEVEL_DATA);
+    const blocks = normalizeBlocks(raw.blocks);
+    const rails = normalizeRails(raw.rails);
+    const speed = Number(raw.minecart && raw.minecart.speed);
+    const cameraSettings = normalizeCameraSettings(raw.camera);
+    return {
+      levelId: levelData.id,
+      blocks: blocks.length > 0 ? blocks : normalizeBlocks(levelData.blocks),
+      rails: rails.length > 0 ? rails : (normalizeRails(levelData.rails).length > 0 ? normalizeRails(levelData.rails) : getDefaultUserRails()),
+      minecartSpeed: Number.isFinite(speed) && speed > 0 ? speed : levelData.minecartSpeed,
+      camera: cameraSettings || normalizeCameraSettings(levelData.camera),
+    };
+  }
+
+  function normalizeLevelPayload(raw, fallbackId) {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+    const id = String(raw.id || '').trim() || fallbackId;
+    const name = String(raw.name || '').trim() || id;
+    const blocks = normalizeBlocks(pickBlocksPayload(raw));
+    const rails = normalizeRails(pickRailsPayload(raw));
+    const speed = Number(raw.minecart && raw.minecart.speed);
+    const camera = normalizeCameraSettings(raw.camera);
+    return {
+      id,
+      name,
+      blocks,
+      rails,
+      minecart: {
+        speed: Number.isFinite(speed) && speed > 0 ? speed : 11,
+      },
+      camera: camera || null,
+    };
+  }
+
+  function upsertRuntimeLevel(levelRaw) {
+    const level = normalizeLevelPayload(levelRaw, `imported_level_${makeTimestampTag()}`);
+    if (!level) {
+      return null;
+    }
+    const existingIndex = LEVEL_CATALOG.findIndex((item) => item && item.id === level.id);
+    if (existingIndex >= 0) {
+      LEVEL_CATALOG[existingIndex] = level;
+    } else {
+      LEVEL_CATALOG.push(level);
+    }
+    LEVELS_BY_ID.set(level.id, level);
+    return level;
+  }
+
   function restoreSceneLayout() {
     try {
       const raw = localStorage.getItem(SCENE_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        const levelData = cloneLevelData(LEVELS_BY_ID.get(parsed && parsed.levelId) || INITIAL_LEVEL_DATA);
-        activeLevelId = levelData.id;
-        const blocks = normalizeBlocks(parsed && parsed.blocks);
-        const rails = normalizeRails(parsed && parsed.rails);
-        const speed = Number(parsed && parsed.minecart && parsed.minecart.speed);
-        const cameraSettings = normalizeCameraSettings(parsed && parsed.camera);
-
+        const normalized = normalizeSceneSnapshotPayload(parsed);
+        if (!normalized) {
+          return false;
+        }
+        activeLevelId = normalized.levelId;
         const sceneData = {
-          blocks: blocks.length > 0 ? blocks : normalizeBlocks(levelData.blocks),
-          rails: rails.length > 0 ? rails : normalizeRails(levelData.rails),
+          blocks: normalized.blocks,
+          rails: normalized.rails,
         };
         editor.loadJSON(sceneData);
         buildManager.loadFromLevel(sceneData);
         railEditor.loadData(sceneData.rails);
         trackController.setRailLayout(railEditor.exportData());
-        if (Number.isFinite(speed) && speed > 0) {
-          minecart.setSpeed(speed);
-        } else {
-          minecart.setSpeed(levelData.minecartSpeed);
-        }
-        if (cameraSettings) {
-          Object.assign(cameraDebugState, cameraSettings);
+        minecart.setSpeed(normalized.minecartSpeed);
+        if (normalized.camera) {
+          Object.assign(cameraDebugState, normalized.camera);
           applyCameraDebugState();
-        } else if (levelData.camera) {
-          const defaultLevelCamera = normalizeCameraSettings(levelData.camera);
-          if (defaultLevelCamera) {
-            Object.assign(cameraDebugState, defaultLevelCamera);
-            applyCameraDebugState();
-          }
         }
         return true;
       }
@@ -3492,12 +3646,15 @@
   });
   if (!restoreSceneLayout()) {
     const levelData = cloneLevelData(LEVELS_BY_ID.get(activeLevelId) || INITIAL_LEVEL_DATA);
+    const levelRails = normalizeRails(levelData.rails);
     const sceneData = {
       blocks: normalizeBlocks(levelData.blocks),
-      rails: normalizeRails(levelData.rails),
+      rails: levelRails.length > 0 ? levelRails : getDefaultUserRails(),
     };
     editor.loadJSON(sceneData);
     buildManager.loadFromLevel(sceneData);
+    railEditor.loadData(sceneData.rails);
+    trackController.setRailLayout(railEditor.exportData());
     minecart.setSpeed(levelData.minecartSpeed);
     if (levelData.camera) {
       const levelCamera = normalizeCameraSettings(levelData.camera);
@@ -3506,7 +3663,6 @@
         applyCameraDebugState();
       }
     }
-    loadDefaultRails();
   }
   minecart.snapToNearestPoint(new THREE.Vector3(9.8, trackController.pathY, 0));
   ensureDoorModelLoading();
@@ -3599,7 +3755,9 @@
     const blockSelect = document.getElementById('editor-block');
     const levelSelect = document.getElementById('level-select');
     const levelLoadBtn = document.getElementById('level-load');
-    const levelExportModuleBtn = document.getElementById('level-export-module');
+    const levelSaveFileBtn = document.getElementById('level-save-file');
+    const levelOpenFileBtn = document.getElementById('level-open-file');
+    const levelFileInput = document.getElementById('level-file-input');
     const layerInput = document.getElementById('editor-layer');
     const clearBtn = document.getElementById('editor-clear');
     const railEnabledInput = document.getElementById('rail-enabled');
@@ -3608,10 +3766,9 @@
     const minecartSpeedInput = document.getElementById('minecart-speed');
     const railClearBtn = document.getElementById('rail-clear');
     const railAutoBtn = document.getElementById('rail-auto');
-    const railExportBtn = document.getElementById('rail-export');
-    const railImportBtn = document.getElementById('rail-import');
-    const blocksImportCenterBtn = document.getElementById('blocks-import-center');
-    const exportBtn = document.getElementById('editor-export');
+    const sceneExportFileBtn = document.getElementById('scene-export-file');
+    const sceneImportFileBtn = document.getElementById('scene-import-file');
+    const sceneFileInput = document.getElementById('scene-file-input');
     const applyBtn = document.getElementById('editor-apply');
     const cameraFlyEnabledInput = document.getElementById('cam-fly-enabled');
     const cameraLookAtEnabledInput = document.getElementById('cam-lookat-enabled');
@@ -3632,7 +3789,6 @@
     const cameraFilmGaugeInput = document.getElementById('cam-film-gauge');
     const cameraFilmOffsetInput = document.getElementById('cam-film-offset');
     const cameraResetBtn = document.getElementById('cam-reset');
-    const cameraCopyBtn = document.getElementById('cam-copy');
 
     function populateBlockSelect() {
       blockSelect.innerHTML = '';
@@ -3715,10 +3871,11 @@
     function loadSelectedLevel(levelId) {
       const levelData = cloneLevelData(LEVELS_BY_ID.get(levelId) || INITIAL_LEVEL_DATA);
       activeLevelId = levelData.id;
+      const levelRails = normalizeRails(levelData.rails);
 
       const sceneData = {
         blocks: normalizeBlocks(levelData.blocks),
-        rails: normalizeRails(levelData.rails),
+        rails: levelRails.length > 0 ? levelRails : getDefaultUserRails(),
       };
       editor.loadJSON(sceneData);
       buildManager.loadFromLevel(sceneData);
@@ -3745,6 +3902,52 @@
       }
     }
 
+    function applySceneSnapshotToRuntime(snapshot, options) {
+      const normalized = normalizeSceneSnapshotPayload(snapshot);
+      if (!normalized) {
+        return false;
+      }
+      activeLevelId = normalized.levelId;
+      const sceneData = {
+        blocks: normalized.blocks,
+        rails: normalized.rails,
+      };
+      editor.loadJSON(sceneData);
+      buildManager.loadFromLevel(sceneData);
+      railEditor.loadData(sceneData.rails);
+      trackController.setRailLayout(railEditor.exportData());
+      minecart.setSpeed(normalized.minecartSpeed);
+      minecartSpeedInput.value = String(minecart.getSpeed());
+      if (normalized.camera) {
+        Object.assign(cameraDebugState, normalized.camera);
+        applyCameraDebugState();
+        setCameraInputsFromState();
+      }
+      minecart.snapToNearestPoint(new THREE.Vector3(9.8, trackController.pathY, 0));
+      syncBlockCountsFromLevel();
+      refreshUiLockState();
+      if (!options || options.persist !== false) {
+        saveSceneLayout();
+      }
+      if (levelSelect) {
+        levelSelect.value = activeLevelId;
+      }
+      return true;
+    }
+
+    function buildCurrentLevelPayload() {
+      const currentLevel = cloneLevelData(LEVELS_BY_ID.get(activeLevelId) || { id: activeLevelId, name: activeLevelId });
+      const baseId = toSlug(activeLevelId || 'new_level', 'new_level');
+      return {
+        id: baseId,
+        name: currentLevel.name || baseId,
+        blocks: getEditorBlocksSnapshot(),
+        rails: normalizeRails(railEditor.exportData()),
+        minecart: { speed: minecart.getSpeed() },
+        camera: exportCameraDebugState(),
+      };
+    }
+
     enabledInput.addEventListener('change', () => {
       editor.setEnabled(enabledInput.checked);
     });
@@ -3759,27 +3962,53 @@
       });
     }
 
-    if (levelExportModuleBtn) {
-      levelExportModuleBtn.addEventListener('click', async () => {
-        const exported = JSON.parse(editor.exportJSON());
-        const payload = {
-          id: `${activeLevelId || 'new_level'}_copy`,
-          name: 'New Level',
-          blocks: Array.isArray(exported.blocks) ? exported.blocks : [],
-          rails: railEditor.exportData(),
-          minecart: { speed: minecart.getSpeed() },
-        };
+    if (levelSaveFileBtn) {
+      levelSaveFileBtn.addEventListener('click', async () => {
+        const payload = buildCurrentLevelPayload();
         const moduleText = [
           '(function () {',
           `  window.registerMinecraftLevel(${JSON.stringify(payload, null, 2)});`,
           '})();',
         ].join('\n');
-        try {
-          await navigator.clipboard.writeText(moduleText);
-        } catch (error) {
-          console.warn('Clipboard write failed, showing module text in prompt', error);
+        const baseName = toSlug(payload.id, 'level');
+        const filename = `${baseName}_${makeTimestampTag()}.js`;
+        await saveTextToFile(filename, moduleText, 'text/javascript;charset=utf-8', ['.js']);
+      });
+    }
+
+    if (levelOpenFileBtn && levelFileInput) {
+      levelOpenFileBtn.addEventListener('click', () => {
+        levelFileInput.value = '';
+        levelFileInput.click();
+      });
+      levelFileInput.addEventListener('change', async () => {
+        const file = levelFileInput.files && levelFileInput.files[0];
+        if (!file) {
+          return;
         }
-        window.prompt('Level module JS', moduleText);
+        try {
+          const raw = await file.text();
+          const parsed = parseLevelFileData(raw);
+          const fallbackId = `imported_level_${makeTimestampTag()}`;
+          const normalized = normalizeLevelPayload(parsed, fallbackId);
+          if (!normalized || normalized.blocks.length === 0) {
+            window.alert('Level file is invalid or has no valid blocks.');
+            return;
+          }
+          const upserted = upsertRuntimeLevel(normalized);
+          if (!upserted) {
+            window.alert('Failed to import level file.');
+            return;
+          }
+          populateLevelSelect();
+          loadSelectedLevel(upserted.id);
+          window.alert(`Level imported: ${upserted.id}`);
+        } catch (error) {
+          console.warn('Failed to import level file', error);
+          window.alert(`Failed to import level file.\nReason: ${error && error.message ? error.message : 'Unknown error'}`);
+        } finally {
+          levelFileInput.value = '';
+        }
       });
     }
 
@@ -3817,107 +4046,46 @@
     railAutoBtn.addEventListener('click', () => {
       autoPlaceRails();
     });
-    railExportBtn.addEventListener('click', async () => {
-      const text = JSON.stringify({ rails: railEditor.exportData() }, null, 2);
-      try {
-        await navigator.clipboard.writeText(text);
-      } catch (error) {
-        console.warn('Clipboard write failed, showing rails JSON in prompt', error);
-      }
-      window.prompt('Rails JSON', text);
-    });
-    railImportBtn.addEventListener('click', () => {
-      if (activeBlockId !== null) {
-        window.alert('Finish active block cycle first, then import rails.');
-        return;
-      }
-      const raw = window.prompt('Paste Rails JSON ({"rails":[...]} or plain array)');
-      if (!raw) {
-        return;
-      }
-      try {
-        const parsed = parseJsonLoose(raw);
-        const rails = normalizeRails(pickRailsPayload(parsed));
-        if (rails.length === 0) {
-          const extractedRails = extractRailsFromArbitraryText(raw);
-          if (extractedRails.length === 0) {
-            window.alert('No valid rails found in JSON.');
+    if (sceneExportFileBtn) {
+      sceneExportFileBtn.addEventListener('click', async () => {
+        const snapshot = getCurrentSceneSnapshot();
+        const text = JSON.stringify(snapshot, null, 2);
+        const filename = `scene_${toSlug(snapshot.levelId, 'level')}_${makeTimestampTag()}.json`;
+        await saveTextToFile(filename, text, 'application/json;charset=utf-8', ['.json']);
+      });
+    }
+
+    if (sceneImportFileBtn && sceneFileInput) {
+      sceneImportFileBtn.addEventListener('click', () => {
+        sceneFileInput.value = '';
+        sceneFileInput.click();
+      });
+      sceneFileInput.addEventListener('change', async () => {
+        const file = sceneFileInput.files && sceneFileInput.files[0];
+        if (!file) {
+          return;
+        }
+        try {
+          const raw = await file.text();
+          const parsed = parseJsonLoose(raw);
+          if (activeBlockId !== null) {
+            window.alert('Finish active block cycle first, then import scene.');
             return;
           }
-          railEditor.loadData(extractedRails);
-          trackController.setRailLayout(railEditor.exportData());
-          saveSceneLayout();
-          window.alert(`Imported rails: ${extractedRails.length}`);
-          return;
+          const applied = applySceneSnapshotToRuntime(parsed);
+          if (!applied) {
+            window.alert('Invalid scene file.');
+            return;
+          }
+          window.alert('Scene imported.');
+        } catch (error) {
+          console.warn('Failed to import scene file', error);
+          window.alert(`Failed to import scene file.\nReason: ${error && error.message ? error.message : 'Unknown error'}`);
+        } finally {
+          sceneFileInput.value = '';
         }
-        railEditor.loadData(rails);
-        trackController.setRailLayout(railEditor.exportData());
-        saveSceneLayout();
-        window.alert(`Imported rails: ${rails.length}`);
-      } catch (error) {
-        const extractedRails = extractRailsFromArbitraryText(raw);
-        if (extractedRails.length > 0) {
-          railEditor.loadData(extractedRails);
-          trackController.setRailLayout(railEditor.exportData());
-          saveSceneLayout();
-          window.alert(`Imported rails: ${extractedRails.length}`);
-          return;
-        }
-        console.warn('Failed to import rails JSON', error);
-        const reason = error && error.message ? `\nReason: ${error.message}` : '';
-        window.alert(`Failed to import rails JSON.${reason}`);
-      }
-    });
-    blocksImportCenterBtn.addEventListener('click', () => {
-      if (activeBlockId !== null) {
-        window.alert('Finish active block cycle first, then import blocks.');
-        return;
-      }
-      const raw = window.prompt('Paste Blocks JSON ({"blocks":[...]} or plain array)');
-      if (!raw) {
-        return;
-      }
-      try {
-        const parsed = parseJsonLoose(raw);
-        const blocksRaw = pickBlocksPayload(parsed);
-        const centered = centerBlocksInEditorBounds(blocksRaw, editor);
-        if (centered.length === 0) {
-          window.alert('No valid blocks found (or all blocks are outside editor bounds).');
-          return;
-        }
-
-        const data = {
-          blocks: centered,
-          rails: railEditor.exportData(),
-        };
-        editor.loadJSON(data);
-        buildManager.loadFromLevel(data);
-        syncBlockCountsFromLevel();
-        refreshUiLockState();
-        saveSceneLayout();
-        window.alert(`Imported blocks (centered): ${centered.length}`);
-      } catch (error) {
-        console.warn('Failed to import blocks JSON', error);
-        const reason = error && error.message ? `\nReason: ${error.message}` : '';
-        window.alert(`Failed to import blocks JSON.${reason}`);
-      }
-    });
-
-    exportBtn.addEventListener('click', async () => {
-      const payload = {
-        levelId: activeLevelId,
-        blocks: JSON.parse(editor.exportJSON()).blocks || [],
-        rails: railEditor.exportData(),
-        minecart: { speed: minecart.getSpeed() },
-      };
-      const text = JSON.stringify(payload, null, 2);
-      try {
-        await navigator.clipboard.writeText(text);
-      } catch (error) {
-        console.warn('Clipboard write failed, showing JSON in prompt', error);
-      }
-      window.prompt('Level JSON', text);
-    });
+      });
+    }
 
     applyBtn.addEventListener('click', () => {
       if (activeBlockId !== null) {
@@ -3963,15 +4131,6 @@
       applyCameraDebugState();
       setCameraInputsFromState();
       saveSceneLayout();
-    });
-    cameraCopyBtn.addEventListener('click', async () => {
-      const text = JSON.stringify(exportCameraDebugState(), null, 2);
-      try {
-        await navigator.clipboard.writeText(text);
-      } catch (error) {
-        console.warn('Clipboard write failed, showing camera JSON in prompt', error);
-      }
-      window.prompt('Camera JSON', text);
     });
 
     populateBlockSelect();

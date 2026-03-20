@@ -10,140 +10,161 @@
     <canvas id="app"></canvas>
 
     <div id="debug-editor" class="debug-editor">
-      <div class="debug-title">Level Debug</div>
+      <div class="debug-title">Debug Panel</div>
       <label class="debug-row">
         <span>Mode</span>
         <input id="editor-enabled" type="checkbox" />
       </label>
-      <label class="debug-row">
-        <span>Level</span>
-        <select id="level-select"></select>
-      </label>
-      <div class="debug-actions">
-        <button id="level-load" type="button">Load Level</button>
-        <button id="level-export-module" type="button">Export Level JS</button>
-      </div>
-      <label class="debug-row">
-        <span>Block</span>
-        <select id="editor-block"></select>
-      </label>
-      <label class="debug-row">
-        <span>Layer Y</span>
-        <input id="editor-layer" type="number" min="0" max="8" value="0" />
-      </label>
-      <hr />
-      <label class="debug-row">
-        <span>Rail Edit</span>
-        <input id="rail-enabled" type="checkbox" />
-      </label>
-      <label class="debug-row">
-        <span>Rail Type</span>
-        <select id="rail-type">
-          <option value="straight">Straight</option>
-          <option value="corner">Corner</option>
-        </select>
-      </label>
-      <label class="debug-row">
-        <span>Rail Rot</span>
-        <select id="rail-rot">
-          <option value="0">0°</option>
-          <option value="90">90°</option>
-          <option value="180">180°</option>
-          <option value="270">270°</option>
-        </select>
-      </label>
-      <label class="debug-row">
-        <span>Cart Spd</span>
-        <input id="minecart-speed" type="number" step="0.1" value="11" />
-      </label>
-      <div class="debug-actions">
-        <button id="editor-clear" type="button">Clear</button>
-        <button id="rail-clear" type="button">Clear Rails</button>
-        <button id="rail-auto" type="button">Auto Rails</button>
-        <button id="rail-export" type="button">Export Rails</button>
-        <button id="rail-import" type="button">Import Rails</button>
-        <button id="blocks-import-center" type="button">Import Blocks Center</button>
-        <button id="editor-export" type="button">Export JSON</button>
-        <button id="editor-apply" type="button">Use As Target</button>
-      </div>
-      <hr />
-      <div class="debug-title">Camera Debug</div>
-      <label class="debug-row">
-        <span>Fly Cam</span>
-        <input id="cam-fly-enabled" type="checkbox" />
-      </label>
-      <label class="debug-row">
-        <span>LookAt</span>
-        <input id="cam-lookat-enabled" type="checkbox" checked />
-      </label>
-      <label class="debug-row">
-        <span>Pos X</span>
-        <input id="cam-pos-x" type="number" step="0.1" value="14.5" />
-      </label>
-      <label class="debug-row">
-        <span>Pos Y</span>
-        <input id="cam-pos-y" type="number" step="0.1" value="16" />
-      </label>
-      <label class="debug-row">
-        <span>Pos Z</span>
-        <input id="cam-pos-z" type="number" step="0.1" value="14.5" />
-      </label>
-      <label class="debug-row">
-        <span>Rot X</span>
-        <input id="cam-rot-x" type="number" step="1" value="-35" />
-      </label>
-      <label class="debug-row">
-        <span>Rot Y</span>
-        <input id="cam-rot-y" type="number" step="1" value="45" />
-      </label>
-      <label class="debug-row">
-        <span>Rot Z</span>
-        <input id="cam-rot-z" type="number" step="1" value="0" />
-      </label>
-      <label class="debug-row">
-        <span>Target X</span>
-        <input id="cam-target-x" type="number" step="0.1" value="0" />
-      </label>
-      <label class="debug-row">
-        <span>Target Y</span>
-        <input id="cam-target-y" type="number" step="0.1" value="0" />
-      </label>
-      <label class="debug-row">
-        <span>Target Z</span>
-        <input id="cam-target-z" type="number" step="0.1" value="0" />
-      </label>
-      <label class="debug-row">
-        <span>FOV</span>
-        <input id="cam-fov" type="number" step="0.1" value="42" />
-      </label>
-      <label class="debug-row">
-        <span>Near</span>
-        <input id="cam-near" type="number" step="0.01" value="0.1" />
-      </label>
-      <label class="debug-row">
-        <span>Far</span>
-        <input id="cam-far" type="number" step="0.1" value="120" />
-      </label>
-      <label class="debug-row">
-        <span>Zoom</span>
-        <input id="cam-zoom" type="number" step="0.01" value="1" />
-      </label>
-      <label class="debug-row">
-        <span>Focus</span>
-        <input id="cam-focus" type="number" step="0.1" value="10" />
-      </label>
-      <label class="debug-row">
-        <span>Film G</span>
-        <input id="cam-film-gauge" type="number" step="0.1" value="35" />
-      </label>
-      <label class="debug-row">
-        <span>Film Off</span>
-        <input id="cam-film-offset" type="number" step="0.1" value="0" />
-      </label>
-      <div class="debug-actions">
-        <button id="cam-reset" type="button">Reset Cam</button>
-        <button id="cam-copy" type="button">Copy Cam JSON</button>
-      </div>
+      <details class="debug-group" open>
+        <summary>Levels</summary>
+        <label class="debug-row">
+          <span>Level</span>
+          <select id="level-select"></select>
+        </label>
+        <div class="debug-actions">
+          <button id="level-load" type="button">Load Level</button>
+          <button id="level-save-file" type="button">Save Level File</button>
+          <button id="level-open-file" type="button">Open Level File</button>
+        </div>
+      </details>
+
+      <details class="debug-group" open>
+        <summary>Blocks</summary>
+        <label class="debug-row">
+          <span>Block</span>
+          <select id="editor-block"></select>
+        </label>
+        <label class="debug-row">
+          <span>Layer Y</span>
+          <input id="editor-layer" type="number" min="0" max="8" value="0" />
+        </label>
+        <div class="debug-actions">
+          <button id="editor-clear" type="button">Clear Blocks</button>
+          <button id="editor-apply" type="button">Use As Target</button>
+        </div>
+      </details>
+
+      <details class="debug-group">
+        <summary>Rails</summary>
+        <label class="debug-row">
+          <span>Rail Edit</span>
+          <input id="rail-enabled" type="checkbox" />
+        </label>
+        <label class="debug-row">
+          <span>Rail Type</span>
+          <select id="rail-type">
+            <option value="straight">Straight</option>
+            <option value="corner">Corner</option>
+          </select>
+        </label>
+        <label class="debug-row">
+          <span>Rail Rot</span>
+          <select id="rail-rot">
+            <option value="0">0°</option>
+            <option value="90">90°</option>
+            <option value="180">180°</option>
+            <option value="270">270°</option>
+          </select>
+        </label>
+        <label class="debug-row">
+          <span>Cart Spd</span>
+          <input id="minecart-speed" type="number" step="0.1" value="11" />
+        </label>
+        <div class="debug-actions">
+          <button id="rail-clear" type="button">Clear Rails</button>
+          <button id="rail-auto" type="button">Auto Rails</button>
+        </div>
+      </details>
+
+      <details class="debug-group">
+        <summary>Scene IO</summary>
+        <div class="debug-actions">
+          <button id="scene-export-file" type="button">Save Scene File</button>
+          <button id="scene-import-file" type="button">Open Scene File</button>
+        </div>
+      </details>
+
+      <details class="debug-group">
+        <summary>Camera</summary>
+        <label class="debug-row">
+          <span>Fly Cam</span>
+          <input id="cam-fly-enabled" type="checkbox" />
+        </label>
+        <label class="debug-row">
+          <span>LookAt</span>
+          <input id="cam-lookat-enabled" type="checkbox" checked />
+        </label>
+        <label class="debug-row">
+          <span>Pos X</span>
+          <input id="cam-pos-x" type="number" step="0.1" value="14.5" />
+        </label>
+        <label class="debug-row">
+          <span>Pos Y</span>
+          <input id="cam-pos-y" type="number" step="0.1" value="16" />
+        </label>
+        <label class="debug-row">
+          <span>Pos Z</span>
+          <input id="cam-pos-z" type="number" step="0.1" value="14.5" />
+        </label>
+        <label class="debug-row">
+          <span>Rot X</span>
+          <input id="cam-rot-x" type="number" step="1" value="-35" />
+        </label>
+        <label class="debug-row">
+          <span>Rot Y</span>
+          <input id="cam-rot-y" type="number" step="1" value="45" />
+        </label>
+        <label class="debug-row">
+          <span>Rot Z</span>
+          <input id="cam-rot-z" type="number" step="1" value="0" />
+        </label>
+        <label class="debug-row">
+          <span>Target X</span>
+          <input id="cam-target-x" type="number" step="0.1" value="0" />
+        </label>
+        <label class="debug-row">
+          <span>Target Y</span>
+          <input id="cam-target-y" type="number" step="0.1" value="0" />
+        </label>
+        <label class="debug-row">
+          <span>Target Z</span>
+          <input id="cam-target-z" type="number" step="0.1" value="0" />
+        </label>
+        <label class="debug-row">
+          <span>FOV</span>
+          <input id="cam-fov" type="number" step="0.1" value="42" />
+        </label>
+        <label class="debug-row">
+          <span>Near</span>
+          <input id="cam-near" type="number" step="0.01" value="0.1" />
+        </label>
+        <label class="debug-row">
+          <span>Far</span>
+          <input id="cam-far" type="number" step="0.1" value="120" />
+        </label>
+        <label class="debug-row">
+          <span>Zoom</span>
+          <input id="cam-zoom" type="number" step="0.01" value="1" />
+        </label>
+        <label class="debug-row">
+          <span>Focus</span>
+          <input id="cam-focus" type="number" step="0.1" value="10" />
+        </label>
+        <label class="debug-row">
+          <span>Film G</span>
+          <input id="cam-film-gauge" type="number" step="0.1" value="35" />
+        </label>
+        <label class="debug-row">
+          <span>Film Off</span>
+          <input id="cam-film-offset" type="number" step="0.1" value="0" />
+        </label>
+        <div class="debug-actions">
+          <button id="cam-reset" type="button">Reset Cam</button>
+        </div>
+      </details>
+
+      <input id="scene-file-input" type="file" accept=".json,application/json" hidden />
+      <input id="level-file-input" type="file" accept=".js,.json,text/javascript,application/json" hidden />
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
@@ -153,6 +174,6 @@
     <script src="./js/game/data/levels/registry.js"></script>
     <script src="./js/game/data/levels/level-01-starter.js"></script>
     <script src="./js/game/data/levels/level-02-forms.js"></script>
-    <script src="./js/game/app.js?v=20260320-02"></script>
+    <script src="./js/game/app.js?v=20260320-03"></script>
   </body>
 </html>

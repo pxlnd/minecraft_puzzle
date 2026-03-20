@@ -43,6 +43,30 @@ body {
   text-transform: uppercase;
 }
 
+.debug-group {
+  border: 1px solid rgba(226, 192, 150, 0.25);
+  border-radius: 10px;
+  padding: 6px;
+}
+
+.debug-group summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #f8e7d6;
+  margin-bottom: 6px;
+}
+
+.debug-group[open] summary {
+  margin-bottom: 8px;
+}
+
+.debug-group > * + * {
+  margin-top: 8px;
+}
+
 .debug-row {
   display: grid;
   grid-template-columns: 84px 1fr;
@@ -69,10 +93,6 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-}
-
-#editor-apply {
-  grid-column: 1 / -1;
 }
 
 .debug-actions button {
@@ -105,6 +125,10 @@ body {
     grid-template-columns: 72px 1fr;
     gap: 6px;
     font-size: 12px;
+  }
+
+  .debug-group {
+    padding: 5px;
   }
 
   .debug-actions button {
