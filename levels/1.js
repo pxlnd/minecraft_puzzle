@@ -1,63 +1,497 @@
 (function () {
   window.registerMinecraftLevel({
-  "id": "small_starter_house",
+  "id": "starter_plaza",
   "name": "Small Starter House",
   "blocks": [
     {
-      "type": "wood",
+      "type": "stone_stairs",
+      "x": -2,
+      "y": 0,
+      "z": -3,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "wood_stairs",
+      "x": -1,
+      "y": 0,
+      "z": -3,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone_stairs",
+      "x": 0,
+      "y": 0,
+      "z": -3,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "wood_stairs",
+      "x": 1,
+      "y": 0,
+      "z": -3,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone_stairs",
+      "x": 2,
+      "y": 0,
+      "z": -3,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone_stairs",
+      "x": -3,
+      "y": 0,
+      "z": -2,
+      "texture": "stonebrick",
+      "rotYDeg": 90
+    },
+    {
+      "type": "stone",
       "x": -2,
       "y": 0,
       "z": -2,
-      "texture": "wood"
+      "texture": "stonebrick"
     },
     {
-      "type": "wood",
+      "type": "water",
+      "x": -1,
+      "y": 0,
+      "z": -2,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "water",
+      "x": 0,
+      "y": 0,
+      "z": -2,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "water",
+      "x": 1,
+      "y": 0,
+      "z": -2,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone",
       "x": 2,
       "y": 0,
       "z": -2,
-      "texture": "wood"
+      "texture": "stonebrick"
     },
     {
-      "type": "grass",
+      "type": "stone_stairs",
+      "x": 3,
+      "y": 0,
+      "z": -2,
+      "texture": "stonebrick",
+      "rotYDeg": 270
+    },
+    {
+      "type": "wood_stairs",
+      "x": -3,
+      "y": 0,
+      "z": -1,
+      "texture": "stonebrick",
+      "rotYDeg": 90
+    },
+    {
+      "type": "water",
+      "x": -2,
+      "y": 0,
+      "z": -1,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "water",
+      "x": 0,
+      "y": 0,
+      "z": -1,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "water",
+      "x": 2,
+      "y": 0,
+      "z": -1,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone_stairs",
       "x": 3,
       "y": 0,
       "z": -1,
-      "texture": "grass"
+      "texture": "stonebrick",
+      "rotYDeg": 270
+    },
+    {
+      "type": "wood_stairs",
+      "x": -3,
+      "y": 0,
+      "z": 0,
+      "texture": "stonebrick",
+      "rotYDeg": 90
+    },
+    {
+      "type": "water",
+      "x": -2,
+      "y": 0,
+      "z": 0,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "water",
+      "x": -1,
+      "y": 0,
+      "z": 0,
+      "texture": "stonebrick"
     },
     {
       "type": "stone",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "water",
       "x": 1,
       "y": 0,
       "z": 0,
-      "texture": "stone"
+      "texture": "stonebrick"
     },
     {
-      "type": "stone",
+      "type": "water",
+      "x": 2,
+      "y": 0,
+      "z": 0,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "wood_stairs",
+      "x": 3,
+      "y": 0,
+      "z": 0,
+      "texture": "stonebrick",
+      "rotYDeg": 270
+    },
+    {
+      "type": "wood_stairs",
       "x": -3,
       "y": 0,
       "z": 1,
-      "texture": "stone"
+      "texture": "stonebrick",
+      "rotYDeg": 90
+    },
+    {
+      "type": "water",
+      "x": -2,
+      "y": 0,
+      "z": 1,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "water",
+      "x": 0,
+      "y": 0,
+      "z": 1,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "water",
+      "x": 2,
+      "y": 0,
+      "z": 1,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "wood_stairs",
+      "x": 3,
+      "y": 0,
+      "z": 1,
+      "texture": "stonebrick",
+      "rotYDeg": 270
+    },
+    {
+      "type": "stone_stairs",
+      "x": -3,
+      "y": 0,
+      "z": 2,
+      "texture": "stonebrick",
+      "rotYDeg": 90
+    },
+    {
+      "type": "stone",
+      "x": -2,
+      "y": 0,
+      "z": 2,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "water",
+      "x": -1,
+      "y": 0,
+      "z": 2,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "water",
+      "x": 0,
+      "y": 0,
+      "z": 2,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "water",
+      "x": 1,
+      "y": 0,
+      "z": 2,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone",
+      "x": 2,
+      "y": 0,
+      "z": 2,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone_stairs",
+      "x": 3,
+      "y": 0,
+      "z": 2,
+      "texture": "stonebrick",
+      "rotYDeg": 270
+    },
+    {
+      "type": "stone_stairs",
+      "x": -2,
+      "y": 0,
+      "z": 3,
+      "texture": "stonebrick",
+      "rotYDeg": 180
+    },
+    {
+      "type": "wood_stairs",
+      "x": -1,
+      "y": 0,
+      "z": 3,
+      "texture": "stonebrick",
+      "rotYDeg": 180
+    },
+    {
+      "type": "wood_stairs",
+      "x": 0,
+      "y": 0,
+      "z": 3,
+      "texture": "stonebrick",
+      "rotYDeg": 180
+    },
+    {
+      "type": "wood_stairs",
+      "x": 1,
+      "y": 0,
+      "z": 3,
+      "texture": "stonebrick",
+      "rotYDeg": 180
+    },
+    {
+      "type": "stone_stairs",
+      "x": 2,
+      "y": 0,
+      "z": 3,
+      "texture": "stonebrick",
+      "rotYDeg": 180
+    },
+    {
+      "type": "wood_pillar",
+      "x": -2,
+      "y": 1,
+      "z": -2,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "wood_pillar",
+      "x": 2,
+      "y": 1,
+      "z": -2,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone",
+      "x": 0,
+      "y": 1,
+      "z": 0,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "wood_pillar",
+      "x": -2,
+      "y": 1,
+      "z": 2,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "wood_pillar",
+      "x": 2,
+      "y": 1,
+      "z": 2,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone",
+      "x": 0,
+      "y": 2,
+      "z": 0,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone_slab",
+      "x": 0,
+      "y": 3,
+      "z": -1,
+      "texture": "stonebrick",
+      "rotYDeg": 270
+    },
+    {
+      "type": "stone_slab",
+      "x": -1,
+      "y": 3,
+      "z": 0,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone",
+      "x": 0,
+      "y": 3,
+      "z": 0,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone_slab",
+      "x": 1,
+      "y": 3,
+      "z": 0,
+      "texture": "stonebrick",
+      "rotYDeg": 270
+    },
+    {
+      "type": "stone_slab",
+      "x": 0,
+      "y": 3,
+      "z": 1,
+      "texture": "stonebrick",
+      "rotYDeg": 270
+    },
+    {
+      "type": "stone_slab",
+      "x": 0,
+      "y": 3.5,
+      "z": -2,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone",
+      "x": 0,
+      "y": 3.5,
+      "z": -1,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone_slab",
+      "x": -2,
+      "y": 3.5,
+      "z": 0,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone",
+      "x": -1,
+      "y": 3.5,
+      "z": 0,
+      "texture": "stonebrick"
     },
     {
       "type": "stone",
       "x": 1,
-      "y": 0,
-      "z": 1,
-      "texture": "stone"
+      "y": 3.5,
+      "z": 0,
+      "texture": "stonebrick"
     },
     {
-      "type": "wood",
-      "x": 3,
-      "y": 0,
-      "z": 1,
-      "texture": "wood"
+      "type": "stone_slab",
+      "x": 2,
+      "y": 3.5,
+      "z": 0,
+      "texture": "stonebrick"
     },
     {
-      "type": "wood",
-      "x": 1,
-      "y": 1,
+      "type": "stone",
+      "x": 0,
+      "y": 3.5,
       "z": 1,
-      "texture": "wood"
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone_slab",
+      "x": 0,
+      "y": 3.5,
+      "z": 2,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone_stairs",
+      "x": 0,
+      "y": 4,
+      "z": -2,
+      "texture": "stonebrick",
+      "rotYDeg": 180
+    },
+    {
+      "type": "stone_stairs",
+      "x": -2,
+      "y": 4,
+      "z": 0,
+      "texture": "stonebrick",
+      "rotYDeg": 270
+    },
+    {
+      "type": "stone",
+      "x": 0,
+      "y": 4,
+      "z": 0,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "stone_stairs",
+      "x": 2,
+      "y": 4,
+      "z": 0,
+      "texture": "stonebrick",
+      "rotYDeg": 90
+    },
+    {
+      "type": "stone_stairs",
+      "x": 0,
+      "y": 4,
+      "z": 2,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "water",
+      "x": 0,
+      "y": 5,
+      "z": 0,
+      "texture": "stonebrick"
+    },
+    {
+      "type": "wood_pillar",
+      "x": 0,
+      "y": 6,
+      "z": 0,
+      "texture": "stonebrick"
     }
   ],
   "rails": [

@@ -69,6 +69,32 @@
     }
   }
 
+  function createWaterFlowTexture() {
+    const size = 32;
+    const texture = createPixelCanvasTexture(size, (ctx) => {
+      ctx.clearRect(0, 0, size, size);
+      for (let y = 0; y < size; y += 1) {
+        for (let x = 0; x < size; x += 1) {
+          const n = pixelHash(x, y, 319);
+          const waveA = Math.sin((x * 0.64) + (y * 0.84) + n * 3.1);
+          const waveB = Math.sin((x * 1.18) - (y * 0.42) + n * 1.9);
+          const strength = 0.5 + waveA * 0.22 + waveB * 0.12;
+          const clamped = Math.max(0, Math.min(1, strength));
+          const r = Math.round(70 + clamped * 42);
+          const g = Math.round(126 + clamped * 58);
+          const b = Math.round(188 + clamped * 62);
+          const a = Math.round(180 + clamped * 52);
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
+          ctx.fillRect(x, y, 1, 1);
+        }
+      }
+    });
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1.6, 1.6);
+    return texture;
+  }
+
   function createFallbackBlocks() {
     const blocks = [];
     for (let z = -3; z <= 3; z += 1) {
@@ -123,6 +149,13 @@
       color: 0x8bbf67,
     },
     {
+      id: 'water',
+      label: 'Water',
+      shape: 'water',
+      inventory: true,
+      color: 0x4f86df,
+    },
+    {
       id: 'door',
       label: 'Door',
       shape: 'door',
@@ -154,9 +187,35 @@
     rails: createFallbackRails(),
     minecart: { speed: 11 },
   };
-  const LEVEL_CATALOG = Array.isArray(window.MC_LEVELS) && window.MC_LEVELS.length > 0
-    ? window.MC_LEVELS
-    : [FALLBACK_LEVEL_DEF];
+  function normalizeLevelSourcePath(value) {
+    return String(value || '').replace(/\\/g, '/').trim();
+  }
+
+  function isProjectLevel(level) {
+    if (!level || !level.id) {
+      return false;
+    }
+    const sourcePath = normalizeLevelSourcePath(level.__sourcePath);
+    if (!sourcePath) {
+      return false;
+    }
+    return /\/levels\/[^/]+\.js$/i.test(sourcePath);
+  }
+
+  function getProjectLevelLabel(level) {
+    if (!isProjectLevel(level)) {
+      return level && (level.name || level.id) ? (level.name || level.id) : '';
+    }
+    const sourcePath = normalizeLevelSourcePath(level.__sourcePath);
+    const match = sourcePath.match(/\/levels\/([^/]+)\.js$/i);
+    if (match && match[1]) {
+      return match[1];
+    }
+    return level.name || level.id;
+  }
+
+  const REGISTERED_LEVELS = Array.isArray(window.MC_LEVELS) ? window.MC_LEVELS.filter(isProjectLevel) : [];
+  const LEVEL_CATALOG = REGISTERED_LEVELS.length > 0 ? REGISTERED_LEVELS : [FALLBACK_LEVEL_DEF];
   const LEVELS_BY_ID = new Map();
   for (const level of LEVEL_CATALOG) {
     if (level && level.id) {
@@ -202,7 +261,10 @@
     pillar: 'Pillar',
     stairs: 'Stairs',
     door: 'Door',
+    water: 'Water',
   };
+  const WATER_BLOCK_ID = 'water';
+  const WATER_FLOW_TEXTURE = createWaterFlowTexture();
   const EDITOR_GROUP_PROPS = 'props';
   function getEditorGroup(blockDef) {
     if (!blockDef || typeof blockDef !== 'object') {
@@ -571,6 +633,18 @@
         mesh = new THREE.Mesh(new THREE.BoxGeometry(size, size * 0.5, size), material);
       }
       mesh.position.y -= size * 0.25;
+      return mesh;
+    }
+
+    if (shape === 'water') {
+      let mesh;
+      if (variant === 'piece') {
+        mesh = new THREE.Mesh(new THREE.BoxGeometry(size * 0.72, size * 0.72, size * 0.72), material);
+      } else if (variant === 'carrier') {
+        mesh = new THREE.Mesh(new THREE.BoxGeometry(size, size, size), material);
+      } else {
+        mesh = new THREE.Mesh(new THREE.BoxGeometry(size, size, size), material);
+      }
       return mesh;
     }
 
@@ -1861,6 +1935,29 @@
         this.slots[selectedIndex].state = 'reserved';
         return { index: selectedIndex, position: this.slots[selectedIndex].position.clone() };
       }
+
+      // Fallback for compact/custom levels: if strict side/range filters reject everything,
+      // still reserve the nearest matching slot so projectile dispatch remains functional.
+      for (let i = 0; i < this.slots.length; i += 1) {
+        const slot = this.slots[i];
+        if (slot.state !== 'free') {
+          continue;
+        }
+        if (slot.inventoryKey !== inventoryKey) {
+          continue;
+        }
+        const dx = hasOrigin ? (slot.position.x - origin.x) : (slot.position.x - this.center.x);
+        const dz = hasOrigin ? (slot.position.z - origin.z) : (slot.position.z - this.center.z);
+        const distanceSq = (dx * dx) + (dz * dz);
+        if (distanceSq < selectedDistanceSq) {
+          selectedDistanceSq = distanceSq;
+          selectedIndex = i;
+        }
+      }
+      if (selectedIndex >= 0) {
+        this.slots[selectedIndex].state = 'reserved';
+        return { index: selectedIndex, position: this.slots[selectedIndex].position.clone() };
+      }
       return null;
     }
 
@@ -1906,6 +2003,34 @@
         counts[slot.inventoryKey] = (counts[slot.inventoryKey] || 0) + 1;
       }
       return counts;
+    }
+
+    getSlotInventoryStats() {
+      const stats = {};
+      for (const slot of this.slots) {
+        if (!slot || !slot.inventoryKey) {
+          continue;
+        }
+        let entry = stats[slot.inventoryKey];
+        if (!entry) {
+          entry = {
+            count: 0,
+            type: slot.type,
+            textureKey: slot.textureKey,
+          };
+          stats[slot.inventoryKey] = entry;
+        }
+        entry.count += 1;
+        if (
+          entry.textureKey === EDITOR_TEXTURE_MODE_AUTO
+          && slot.textureKey
+          && slot.textureKey !== EDITOR_TEXTURE_MODE_AUTO
+        ) {
+          entry.textureKey = slot.textureKey;
+          entry.type = slot.type;
+        }
+      }
+      return stats;
     }
 
     setVisible(visible) {
@@ -2274,21 +2399,26 @@
     const blockDef = getBlockDefinition(type);
     const shape = blockDef && blockDef.shape ? blockDef.shape : 'cube';
     const textureKey = normalizeEditorTextureKey(options && options.textureKey);
-    const map = textureKey !== EDITOR_TEXTURE_MODE_AUTO
+    const isWater = type === 'water';
+    const map = isWater
+      ? WATER_FLOW_TEXTURE
+      : (textureKey !== EDITOR_TEXTURE_MODE_AUTO
       ? (BLOCK_TEXTURES_BY_KEY[textureKey] || BLOCK_TEXTURES[type] || null)
-      : (BLOCK_TEXTURES[type] || null);
+      : (BLOCK_TEXTURES[type] || null));
     const isDoor = shape === 'door';
     const baseColor = Number.isFinite(blockDef && blockDef.color) ? blockDef.color : color;
     const roughness = shape === 'pillar' || type === 'wood' ? 0.9 : 0.78;
     const metalness = type === 'stone' || type === 'stone_slab' ? 0.12 : 0.04;
     return new THREE.MeshStandardMaterial({
       map,
-      color: map ? 0xffffff : baseColor,
-      roughness,
-      metalness,
-      transparent: false,
+      color: isWater ? 0x74a7ff : (map ? 0xffffff : baseColor),
+      roughness: isWater ? 0.28 : roughness,
+      metalness: isWater ? 0.01 : metalness,
+      transparent: isWater,
+      opacity: isWater ? 0.72 : 1,
       alphaTest: 0,
       side: isDoor ? THREE.DoubleSide : THREE.FrontSide,
+      depthWrite: isWater ? true : !isWater,
     });
   }
 
@@ -2300,8 +2430,10 @@
 
       this.id = options.id;
       this.type = options.type;
+      this.textureKey = normalizeEditorTextureKey(options.textureKey);
       this.color = options.color;
       this.count = options.count;
+      this.onReplaceMesh = typeof options.onReplaceMesh === 'function' ? options.onReplaceMesh : null;
 
       this.onCountChange = options.onCountChange;
       this.onCycleFinish = options.onCycleFinish;
@@ -2326,22 +2458,9 @@
 
       this.projectiles = [];
 
-      this.mesh = createBlockMesh(
-        this.type,
-        1,
-        createBlockMaterial(this.type, this.color),
-        'carrier',
-      );
+      this.mesh = this.createCarrierMesh();
       this.mesh.castShadow = true;
       this.mesh.receiveShadow = true;
-
-      if (this.type !== 'door') {
-        const edges = new THREE.LineSegments(
-          new THREE.EdgesGeometry(CARRIER_GEOMETRY),
-          new THREE.LineBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.42 }),
-        );
-        this.mesh.add(edges);
-      }
 
       this.countCanvas = document.createElement('canvas');
       this.countCanvas.width = 256;
@@ -2358,6 +2477,76 @@
       this.updateCountVisual();
       this.mesh.visible = this.count > 0;
       this.scene.add(this.mesh);
+    }
+
+    createCarrierMesh() {
+      const mesh = createBlockMesh(
+        this.type,
+        1,
+        createBlockMaterial(this.type, this.color, { textureKey: this.textureKey }),
+        'carrier',
+      );
+      if (this.type !== 'door') {
+        const edges = new THREE.LineSegments(
+          new THREE.EdgesGeometry(CARRIER_GEOMETRY),
+          new THREE.LineBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.42 }),
+        );
+        mesh.add(edges);
+      }
+      return mesh;
+    }
+
+    rebuildMeshes() {
+      const oldMesh = this.mesh;
+      const nextMesh = this.createCarrierMesh();
+      nextMesh.castShadow = true;
+      nextMesh.receiveShadow = true;
+      nextMesh.position.copy(oldMesh.position);
+      nextMesh.rotation.copy(oldMesh.rotation);
+      nextMesh.visible = oldMesh.visible;
+      nextMesh.add(this.countSprite);
+      this.mesh = nextMesh;
+      this.scene.add(nextMesh);
+      this.scene.remove(oldMesh);
+      if (this.onReplaceMesh) {
+        this.onReplaceMesh(oldMesh, nextMesh);
+      }
+      disposeObject3D(oldMesh);
+
+      for (const projectile of this.projectiles) {
+        if (!projectile || !projectile.mesh) {
+          continue;
+        }
+        const oldProjectileMesh = projectile.mesh;
+        const nextProjectileMesh = createBlockMesh(
+          this.type,
+          0.32,
+          createBlockMaterial(this.type, this.color, { textureKey: this.textureKey }),
+          'piece',
+        );
+        nextProjectileMesh.castShadow = true;
+        nextProjectileMesh.receiveShadow = true;
+        nextProjectileMesh.position.copy(oldProjectileMesh.position);
+        nextProjectileMesh.rotation.copy(oldProjectileMesh.rotation);
+        nextProjectileMesh.visible = oldProjectileMesh.visible;
+        projectile.mesh = nextProjectileMesh;
+        this.scene.add(nextProjectileMesh);
+        this.scene.remove(oldProjectileMesh);
+        disposeObject3D(oldProjectileMesh);
+      }
+    }
+
+    setAppearance(type, textureKey) {
+      const nextType = type || this.type;
+      const nextTextureKey = normalizeEditorTextureKey(textureKey);
+      const sameType = nextType === this.type;
+      const sameTexture = nextTextureKey === this.textureKey;
+      if (sameType && sameTexture) {
+        return;
+      }
+      this.type = nextType;
+      this.textureKey = nextTextureKey;
+      this.rebuildMeshes();
     }
 
     setUiAnchor(position) {
@@ -2539,7 +2728,7 @@
       const piece = createBlockMesh(
         this.type,
         0.32,
-        createBlockMaterial(this.type, this.color),
+        createBlockMaterial(this.type, this.color, { textureKey: this.textureKey }),
         'piece',
       );
       piece.castShadow = true;
@@ -2768,6 +2957,11 @@
       this._normalMatrix = new THREE.Matrix3();
       this._worldNormal = new THREE.Vector3();
       this._dominantNormal = new THREE.Vector3();
+      this.waterFlowAccumulator = 0;
+      this.waterFlowStepSec = 0.22;
+      this.waterMaxSpreadLevel = 12;
+      this.waterFlowNeedsRebuild = true;
+      this.waterVisualTime = 0;
 
       this.group = new THREE.Group();
       this.scene.add(this.group);
@@ -2855,6 +3049,167 @@
       return `${x}:${y}:${z}`;
     }
 
+    getVerticalStepForType(type) {
+      const blockDef = getBlockDefinition(type);
+      const shape = blockDef && blockDef.shape ? blockDef.shape : 'cube';
+      return shape === 'slab' ? 0.5 : 1;
+    }
+
+    getVerticalStepForEntry(entry) {
+      if (!entry) {
+        return 1;
+      }
+      return this.getVerticalStepForType(entry.type);
+    }
+
+    isWaterType(type) {
+      return type === WATER_BLOCK_ID;
+    }
+
+    isWaterEntry(entry) {
+      return Boolean(entry) && this.isWaterType(entry.type);
+    }
+
+    isWaterSourceEntry(entry) {
+      return this.isWaterEntry(entry) && entry.waterSource !== false;
+    }
+
+    markWaterFlowDirty() {
+      this.waterFlowNeedsRebuild = true;
+    }
+
+    isCellSolid(x, y, z) {
+      const key = this.getCellKey(x, y, z);
+      const entry = this.cells.get(key);
+      return Boolean(entry) && !this.isWaterEntry(entry);
+    }
+
+    hasAnyCell(x, y, z) {
+      return this.cells.has(this.getCellKey(x, y, z));
+    }
+
+    hasWaterCell(x, y, z) {
+      const entry = this.cells.get(this.getCellKey(x, y, z));
+      return this.isWaterEntry(entry);
+    }
+
+    isCellSupportedForWater(x, y, z) {
+      if (y <= 0) {
+        return true;
+      }
+      return this.isCellSolid(x, y - 1, z);
+    }
+
+    isContainedByWallsAt(x, y, z) {
+      if (!this.isCellSupportedForWater(x, y, z)) {
+        return false;
+      }
+      const directions = [
+        { dx: 1, dz: 0 },
+        { dx: -1, dz: 0 },
+        { dx: 0, dz: 1 },
+        { dx: 0, dz: -1 },
+      ];
+      for (const dir of directions) {
+        let cx = x;
+        let cz = z;
+        let blockedByWall = false;
+        for (let step = 0; step < 32; step += 1) {
+          cx += dir.dx;
+          cz += dir.dz;
+          if (cx < this.minX || cx > this.maxX || cz < this.minZ || cz > this.maxZ) {
+            return false;
+          }
+          if (!this.isCellSupportedForWater(cx, y, cz)) {
+            return false;
+          }
+          if (this.isCellSolid(cx, y, cz)) {
+            blockedByWall = true;
+            break;
+          }
+        }
+        if (!blockedByWall) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    hasOpenDropNeighbor(entry) {
+      if (!entry) {
+        return false;
+      }
+      const sides = [
+        { x: entry.x + 1, y: entry.y, z: entry.z },
+        { x: entry.x - 1, y: entry.y, z: entry.z },
+        { x: entry.x, y: entry.y, z: entry.z + 1 },
+        { x: entry.x, y: entry.y, z: entry.z - 1 },
+      ];
+      for (const side of sides) {
+        if (side.x < this.minX || side.x > this.maxX || side.z < this.minZ || side.z > this.maxZ) {
+          continue;
+        }
+        if (this.hasAnyCell(side.x, side.y, side.z)) {
+          continue;
+        }
+        if (!this.isCellSupportedForWater(side.x, side.y, side.z)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    canSpreadSidewaysFrom(entry) {
+      if (!entry || entry.waterLevel >= this.waterMaxSpreadLevel) {
+        return false;
+      }
+      if (entry.y <= 0) {
+        return false;
+      }
+      if (!this.isCellSupportedForWater(entry.x, entry.y, entry.z)) {
+        return false;
+      }
+      return this.isContainedByWallsAt(entry.x, entry.y, entry.z) || this.hasOpenDropNeighbor(entry);
+    }
+
+    upsertCell(type, x, y, z, options = null) {
+      if (x < this.minX || x > this.maxX || z < this.minZ || z > this.maxZ || y < 0 || y > 8) {
+        return null;
+      }
+      const textureKey = normalizeEditorTextureKey(options && (options.textureKey !== undefined ? options.textureKey : options.texture));
+      const rotYDeg = normalizeBlockRotationDeg(options && (
+        options.rotYDeg !== undefined ? options.rotYDeg
+          : (options.rotationDeg !== undefined ? options.rotationDeg : (options.rotation !== undefined ? options.rotation : options.rotY))
+      ));
+      const key = this.getCellKey(x, y, z);
+      const existing = this.cells.get(key);
+      if (existing) {
+        this.group.remove(existing.mesh);
+        disposeObject3D(existing.mesh);
+      }
+
+      const mesh = createBlockMesh(
+        type,
+        this.boxSize,
+        this.createMaterial(type, 0xffffff, { textureKey }),
+        'placed',
+      );
+      setPlacedBlockWorldPosition(mesh, type, this.boxSize, this.cellToPosition(x, y, z));
+      mesh.rotation.y = (rotYDeg * Math.PI) / 180;
+      attachCellUserData(mesh, { x, y, z });
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.group.add(mesh);
+
+      const entry = { type, textureKey, rotYDeg, x, y, z, mesh };
+      if (this.isWaterType(type)) {
+        entry.waterSource = options && options.waterSource !== undefined ? Boolean(options.waterSource) : true;
+        entry.waterLevel = Math.max(0, Math.floor(Number(options && options.waterLevel) || 0));
+      }
+      this.cells.set(key, entry);
+      return entry;
+    }
+
     getTopBlockInColumn(x, z) {
       let top = null;
       for (const entry of this.cells.values()) {
@@ -2874,6 +3229,141 @@
         this.baseY + y * this.cellSize,
         z * this.cellSize,
       );
+    }
+
+    simulateWaterStep() {
+      const additions = new Map();
+      const waters = [];
+      for (const entry of this.cells.values()) {
+        if (this.isWaterEntry(entry)) {
+          waters.push(entry);
+        }
+      }
+      waters.sort((a, b) => b.y - a.y);
+
+      const propose = (x, y, z, level) => {
+        if (x < this.minX || x > this.maxX || z < this.minZ || z > this.maxZ || y < 0 || y > 8) {
+          return;
+        }
+        const key = this.getCellKey(x, y, z);
+        if (this.hasAnyCell(x, y, z) || additions.has(key)) {
+          return;
+        }
+        additions.set(key, { x, y, z, level: Math.max(0, Math.floor(level)) });
+      };
+
+      for (const water of waters) {
+        const belowY = water.y - 1;
+        if (belowY >= 0 && !this.hasAnyCell(water.x, belowY, water.z)) {
+          propose(water.x, belowY, water.z, water.waterLevel || 0);
+          continue;
+        }
+        if (!this.canSpreadSidewaysFrom(water)) {
+          continue;
+        }
+        const nextLevel = (water.waterLevel || 0) + 1;
+        if (nextLevel > this.waterMaxSpreadLevel) {
+          continue;
+        }
+        const sides = [
+          { x: water.x + 1, y: water.y, z: water.z },
+          { x: water.x - 1, y: water.y, z: water.z },
+          { x: water.x, y: water.y, z: water.z + 1 },
+          { x: water.x, y: water.y, z: water.z - 1 },
+        ];
+        for (const side of sides) {
+          const supported = this.isCellSupportedForWater(side.x, side.y, side.z);
+          if (supported) {
+            if (!this.isContainedByWallsAt(side.x, side.y, side.z)) {
+              continue;
+            }
+          }
+          propose(side.x, side.y, side.z, nextLevel);
+        }
+      }
+
+      let changed = false;
+      for (const add of additions.values()) {
+        this.upsertCell(WATER_BLOCK_ID, add.x, add.y, add.z, {
+          waterSource: false,
+          waterLevel: add.level,
+          textureKey: EDITOR_TEXTURE_MODE_AUTO,
+          rotYDeg: 0,
+        });
+        changed = true;
+      }
+
+      const reachable = new Set();
+      const queue = [];
+      for (const [key, entry] of this.cells.entries()) {
+        if (this.isWaterSourceEntry(entry)) {
+          reachable.add(key);
+          queue.push({ x: entry.x, y: entry.y, z: entry.z });
+          entry.waterLevel = 0;
+        }
+      }
+      const neighbors = [
+        { dx: 1, dy: 0, dz: 0 },
+        { dx: -1, dy: 0, dz: 0 },
+        { dx: 0, dy: 1, dz: 0 },
+        { dx: 0, dy: -1, dz: 0 },
+        { dx: 0, dy: 0, dz: 1 },
+        { dx: 0, dy: 0, dz: -1 },
+      ];
+      while (queue.length > 0) {
+        const cur = queue.shift();
+        for (const n of neighbors) {
+          const nx = cur.x + n.dx;
+          const ny = cur.y + n.dy;
+          const nz = cur.z + n.dz;
+          if (nx < this.minX || nx > this.maxX || nz < this.minZ || nz > this.maxZ || ny < 0 || ny > 8) {
+            continue;
+          }
+          const key = this.getCellKey(nx, ny, nz);
+          if (reachable.has(key)) {
+            continue;
+          }
+          if (!this.hasWaterCell(nx, ny, nz)) {
+            continue;
+          }
+          reachable.add(key);
+          queue.push({ x: nx, y: ny, z: nz });
+        }
+      }
+
+      for (const [key, entry] of Array.from(this.cells.entries())) {
+        if (!this.isWaterEntry(entry) || this.isWaterSourceEntry(entry) || reachable.has(key)) {
+          continue;
+        }
+        this.group.remove(entry.mesh);
+        disposeObject3D(entry.mesh);
+        this.cells.delete(key);
+        changed = true;
+      }
+
+      if (changed) {
+        this.notifyChange();
+      }
+    }
+
+    updateWaterVisuals(dt) {
+      this.waterVisualTime += Number.isFinite(dt) ? Math.max(0, dt) : 0;
+      const t = this.waterVisualTime;
+      WATER_FLOW_TEXTURE.offset.x = (t * 0.055) % 1;
+      WATER_FLOW_TEXTURE.offset.y = (t * 0.095) % 1;
+      WATER_FLOW_TEXTURE.needsUpdate = true;
+    }
+
+    update(dt) {
+      this.updateWaterVisuals(dt);
+      const delta = Number.isFinite(dt) ? Math.max(0, dt) : 0;
+      this.waterFlowAccumulator += delta;
+      if (!this.waterFlowNeedsRebuild && this.waterFlowAccumulator < this.waterFlowStepSec) {
+        return;
+      }
+      this.waterFlowAccumulator = 0;
+      this.waterFlowNeedsRebuild = false;
+      this.simulateWaterStep();
     }
 
     intersectGround(event) {
@@ -2950,8 +3440,12 @@
           }
 
           const nx = cell.x + this._dominantNormal.x;
-          const ny = cell.y + this._dominantNormal.y;
+          let ny = cell.y + this._dominantNormal.y;
           const nz = cell.z + this._dominantNormal.z;
+          if (this._dominantNormal.y > 0) {
+            const hitEntry = this.cells.get(this.getCellKey(cell.x, cell.y, cell.z)) || null;
+            ny = cell.y + this.getVerticalStepForEntry(hitEntry);
+          }
           if (
             nx >= this.minX && nx <= this.maxX &&
             nz >= this.minZ && nz <= this.maxZ &&
@@ -2997,17 +3491,19 @@
       }
       const blockHit = this.getHoveredBlockHit(event);
       if (blockHit) {
-        const cell = blockHit.object.userData.cell;
-        const key = this.getCellKey(cell.x, cell.y, cell.z);
-        const existing = this.cells.get(key);
-        if (!existing) {
-          return false;
+        const cell = blockHit.object && blockHit.object.userData ? blockHit.object.userData.cell : null;
+        if (cell) {
+          const hitKey = this.getCellKey(cell.x, cell.y, cell.z);
+          const hitEntry = this.cells.get(hitKey) || null;
+          if (hitEntry) {
+            this.group.remove(hitEntry.mesh);
+            disposeObject3D(hitEntry.mesh);
+            this.cells.delete(this.getCellKey(hitEntry.x, hitEntry.y, hitEntry.z));
+            this.markWaterFlowDirty();
+            this.notifyChange();
+            return true;
+          }
         }
-        this.group.remove(existing.mesh);
-        disposeObject3D(existing.mesh);
-        this.cells.delete(key);
-        this.notifyChange();
-        return true;
       }
 
       const world = this.intersectGround(event);
@@ -3025,6 +3521,7 @@
       this.group.remove(existing.mesh);
       disposeObject3D(existing.mesh);
       this.cells.delete(this.getCellKey(existing.x, existing.y, existing.z));
+      this.markWaterFlowDirty();
       this.notifyChange();
       return true;
     }
@@ -3041,7 +3538,7 @@
       const existing = this.cells.get(key);
       if (existing) {
         const top = this.getTopBlockInColumn(x, z);
-        targetY = Math.min(8, (top ? top.y : y) + 1);
+        targetY = Math.min(8, (top ? top.y : y) + this.getVerticalStepForEntry(top || existing));
       }
       const targetKey = this.getCellKey(x, targetY, z);
       const targetExisting = this.cells.get(targetKey);
@@ -3049,65 +3546,19 @@
         this.group.remove(targetExisting.mesh);
         disposeObject3D(targetExisting.mesh);
       }
-
-      const mesh = createBlockMesh(
-        this.selectedType,
-        this.boxSize,
-        this.createMaterial(this.selectedType, 0xffffff, { textureKey: this.selectedTextureKey }),
-        'placed',
-      );
-      setPlacedBlockWorldPosition(
-        mesh,
-        this.selectedType,
-        this.boxSize,
-        this.cellToPosition(x, targetY, z),
-      );
-      mesh.rotation.y = (this.selectedRotationDeg * Math.PI) / 180;
-      attachCellUserData(mesh, { x, y: targetY, z });
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      this.group.add(mesh);
-      this.cells.set(targetKey, {
-        type: this.selectedType,
+      this.upsertCell(this.selectedType, x, targetY, z, {
         textureKey: this.selectedTextureKey,
         rotYDeg: this.selectedRotationDeg,
-        x,
-        y: targetY,
-        z,
-        mesh,
+        waterSource: this.isWaterType(this.selectedType),
+        waterLevel: 0,
       });
+      this.markWaterFlowDirty();
       this.notifyChange();
     }
 
     placeBlock(type, x, y, z, options = null) {
-      if (x < this.minX || x > this.maxX || z < this.minZ || z > this.maxZ || y < 0 || y > 8) {
-        return;
-      }
-      const textureKey = normalizeEditorTextureKey(options && (options.textureKey !== undefined ? options.textureKey : options.texture));
-      const rotYDeg = normalizeBlockRotationDeg(options && (
-        options.rotYDeg !== undefined ? options.rotYDeg
-          : (options.rotationDeg !== undefined ? options.rotationDeg : (options.rotation !== undefined ? options.rotation : options.rotY))
-      ));
-      const key = this.getCellKey(x, y, z);
-      const existing = this.cells.get(key);
-      if (existing) {
-        this.group.remove(existing.mesh);
-        disposeObject3D(existing.mesh);
-      }
-
-      const mesh = createBlockMesh(
-        type,
-        this.boxSize,
-        this.createMaterial(type, 0xffffff, { textureKey }),
-        'placed',
-      );
-      setPlacedBlockWorldPosition(mesh, type, this.boxSize, this.cellToPosition(x, y, z));
-      mesh.rotation.y = (rotYDeg * Math.PI) / 180;
-      attachCellUserData(mesh, { x, y, z });
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      this.group.add(mesh);
-      this.cells.set(key, { type, textureKey, rotYDeg, x, y, z, mesh });
+      this.upsertCell(type, x, y, z, options);
+      this.markWaterFlowDirty();
     }
 
     clear(shouldNotify = true) {
@@ -3116,6 +3567,7 @@
         disposeObject3D(entry.mesh);
       }
       this.cells.clear();
+      this.markWaterFlowDirty();
       if (shouldNotify) {
         this.notifyChange();
       }
@@ -3123,6 +3575,7 @@
 
     exportJSON() {
       const blocks = Array.from(this.cells.values())
+        .filter((entry) => !this.isWaterEntry(entry) || this.isWaterSourceEntry(entry))
         .map(({ type, textureKey, rotYDeg, x, y, z }) => {
           const block = { type, x, y, z };
           if (textureKey && textureKey !== EDITOR_TEXTURE_MODE_AUTO) {
@@ -3183,6 +3636,7 @@
     id: blockDef.id,
     label: blockDef.label || blockDef.id,
     type: blockDef.id,
+    textureKey: normalizeEditorTextureKey(blockDef.textureKey),
     color: Number.isFinite(blockDef.color) ? blockDef.color : 0xffffff,
     count: 0,
   }));
@@ -3250,6 +3704,7 @@
   });
   editor.loadJSON(DEFAULT_EDITOR_LEVEL);
   const SCENE_STORAGE_KEY = 'minecraft_puzzle:scene_layout_v2';
+  const SELECTED_LEVEL_STORAGE_KEY = 'minecraft_puzzle:selected_level_id_v1';
   const LEGACY_RAILS_STORAGE_KEYS = ['prototype:rails_layout_v2', 'prototype:rails_layout_v1'];
   const RAIL_LOOP_SIZE_PRESETS = {
     '12': { minX: -5, maxX: 6, minZ: -3, maxZ: 3 },
@@ -3258,9 +3713,10 @@
     '18': { minX: -8, maxX: 9, minZ: -6, maxZ: 6 },
     '20': { minX: -9, maxX: 10, minZ: -7, maxZ: 7 },
   };
-  let railLoopSize = '16';
+  let railLoopSizeX = '16';
+  let railLoopSizeY = '16';
 
-  function normalizeRailLoopSize(value) {
+  function normalizeRailLoopSizeValue(value) {
     if (value === 'small') {
       return '14';
     }
@@ -3299,9 +3755,16 @@
   }
 
   function getDefaultUserRails(size) {
-    const normalizedSize = normalizeRailLoopSize(size || railLoopSize);
-    const preset = RAIL_LOOP_SIZE_PRESETS[normalizedSize] || RAIL_LOOP_SIZE_PRESETS['16'];
-    return normalizeRails(buildRailLoopFromBounds(preset));
+    const normalizedX = normalizeRailLoopSizeValue(size && size.x !== undefined ? size.x : railLoopSizeX);
+    const normalizedY = normalizeRailLoopSizeValue(size && size.y !== undefined ? size.y : railLoopSizeY);
+    const presetX = RAIL_LOOP_SIZE_PRESETS[normalizedX] || RAIL_LOOP_SIZE_PRESETS['16'];
+    const presetY = RAIL_LOOP_SIZE_PRESETS[normalizedY] || RAIL_LOOP_SIZE_PRESETS['16'];
+    return normalizeRails(buildRailLoopFromBounds({
+      minX: presetX.minX,
+      maxX: presetX.maxX,
+      minZ: presetY.minZ,
+      maxZ: presetY.maxZ,
+    }));
   }
   const debugEditor = document.getElementById('debug-editor');
   const inventoryMoveEnabledInput = document.getElementById('inventory-move-enabled');
@@ -3612,7 +4075,8 @@
       levelId: activeLevelId,
       blocks: getEditorBlocksSnapshot(),
       build: getBuildSettingsSnapshot(),
-      railLoopSize: normalizeRailLoopSize(railLoopSize),
+      railLoopSizeX: normalizeRailLoopSizeValue(railLoopSizeX),
+      railLoopSizeY: normalizeRailLoopSizeValue(railLoopSizeY),
       rails: safeRails,
       minecart: {
         speed: minecart.getSpeed(),
@@ -3629,8 +4093,24 @@
   function saveSceneLayout() {
     try {
       localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(getCurrentSceneSnapshot()));
+      if (activeLevelId && LEVELS_BY_ID.has(activeLevelId)) {
+        localStorage.setItem(SELECTED_LEVEL_STORAGE_KEY, activeLevelId);
+      }
     } catch (error) {
       console.warn('Failed to save scene to localStorage', error);
+    }
+  }
+
+  function getStoredActiveLevelId() {
+    try {
+      const raw = String(localStorage.getItem(SELECTED_LEVEL_STORAGE_KEY) || '').trim();
+      if (!raw) {
+        return '';
+      }
+      return LEVELS_BY_ID.has(raw) ? raw : '';
+    } catch (error) {
+      console.warn('Failed to restore selected level from localStorage', error);
+      return '';
     }
   }
 
@@ -3644,7 +4124,7 @@
   }
 
   function loadDefaultRails() {
-    const rails = getDefaultUserRails(railLoopSize);
+    const rails = getDefaultUserRails({ x: railLoopSizeX, y: railLoopSizeY });
     railEditor.loadData(rails.length > 0 ? rails : DEFAULT_RAILS_LAYOUT);
     trackController.setRailLayout(railEditor.exportData());
     saveSceneLayout();
@@ -3669,7 +4149,7 @@
       }
       const type = allowedTypes.has(block.type) ? block.type : DEFAULT_BLOCK_ID;
       const ix = Math.round(x);
-      const iy = Math.max(0, Math.min(8, Math.round(y)));
+      const iy = Math.max(0, Math.min(8, Math.round(y * 2) / 2));
       const iz = Math.round(z);
       const textureKey = normalizeEditorTextureKey(
         block.textureKey !== undefined ? block.textureKey : block.texture,
@@ -3689,6 +4169,9 @@
         y: iy,
         z: iz,
       };
+      if (type === WATER_BLOCK_ID && block.waterSource === false) {
+        normalizedBlock.waterSource = false;
+      }
       if (textureKey !== EDITOR_TEXTURE_MODE_AUTO) {
         normalizedBlock.texture = textureKey;
       }
@@ -3990,7 +4473,13 @@
     );
     const blocks = normalizeBlocks(raw.blocks);
     const buildTargetBlocks = resolveBuildTargetBlocks(raw);
-    const snapshotRailLoopSize = normalizeRailLoopSize(raw.railLoopSize);
+    const legacyRailLoopSize = normalizeRailLoopSizeValue(raw.railLoopSize);
+    const snapshotRailLoopSizeX = normalizeRailLoopSizeValue(
+      raw.railLoopSizeX !== undefined ? raw.railLoopSizeX : legacyRailLoopSize,
+    );
+    const snapshotRailLoopSizeY = normalizeRailLoopSizeValue(
+      raw.railLoopSizeY !== undefined ? raw.railLoopSizeY : legacyRailLoopSize,
+    );
     const rails = normalizeRails(raw.rails);
     const speed = Number(raw.minecart && raw.minecart.speed);
     const inventoryX = Number(raw.inventory && raw.inventory.x);
@@ -4008,8 +4497,9 @@
       levelId: levelData.id,
       blocks: effectiveBlocks,
       buildTargetBlocks: effectiveBuildTargetBlocks,
-      railLoopSize: snapshotRailLoopSize,
-      rails: rails.length > 0 ? rails : (normalizeRails(levelData.rails).length > 0 ? normalizeRails(levelData.rails) : getDefaultUserRails(snapshotRailLoopSize)),
+      railLoopSizeX: snapshotRailLoopSizeX,
+      railLoopSizeY: snapshotRailLoopSizeY,
+      rails: rails.length > 0 ? rails : (normalizeRails(levelData.rails).length > 0 ? normalizeRails(levelData.rails) : getDefaultUserRails({ x: snapshotRailLoopSizeX, y: snapshotRailLoopSizeY })),
       minecartSpeed: Number.isFinite(speed) && speed > 0 ? speed : levelData.minecartSpeed,
       inventoryPosition: {
         x: Number.isFinite(inventoryX) ? inventoryX : DEFAULT_INVENTORY_ZONE.x,
@@ -4103,7 +4593,8 @@
           return false;
         }
         activeLevelId = normalized.levelId;
-        railLoopSize = normalized.railLoopSize;
+        railLoopSizeX = normalized.railLoopSizeX;
+        railLoopSizeY = normalized.railLoopSizeY;
         const sceneData = {
           blocks: normalized.blocks,
           rails: normalized.rails,
@@ -4163,6 +4654,10 @@
     onChange: handleRailLayoutChange,
   });
   if (!restoreSceneLayout()) {
+    const storedLevelId = getStoredActiveLevelId();
+    if (storedLevelId) {
+      activeLevelId = storedLevelId;
+    }
     const levelData = cloneLevelData(LEVELS_BY_ID.get(activeLevelId) || INITIAL_LEVEL_DATA);
     const levelRails = normalizeRails(levelData.rails);
     const sceneData = {
@@ -4260,10 +4755,12 @@
       buildManager,
       id: config.id,
       type: config.type,
+      textureKey: config.textureKey,
       color: config.color,
       count: initialCountsByType[config.id] || 0,
       onCountChange: handleCountChange,
       onCycleFinish: handleCycleFinish,
+      onReplaceMesh: (oldMesh, nextMesh) => worldInventory.replaceCarrierMesh(config.id, oldMesh, nextMesh),
     });
 
     const anchor = worldInventory.getSlotAnchor(config.id);
@@ -4282,10 +4779,14 @@
   applyInventorySpinAngle();
 
   function syncBlockCountsFromLevel() {
-    const countsByType = getLevelCountsByType();
+    const statsByType = buildManager.getSlotInventoryStats();
     const visibleIds = [];
     for (const controller of blocks.values()) {
-      const count = countsByType[controller.id] || 0;
+      const stat = statsByType[controller.id] || null;
+      const count = stat ? stat.count : 0;
+      if (stat) {
+        controller.setAppearance(stat.type || controller.type, stat.textureKey);
+      }
       controller.setCount(count);
       if (count > 0) {
         visibleIds.push(controller.id);
@@ -4306,50 +4807,11 @@
   }
 
   function refreshDoorCarrierMeshes() {
-    for (const [id, controller] of blocks.entries()) {
+    for (const controller of blocks.values()) {
       if (!controller || controller.type !== 'door') {
         continue;
       }
-      const oldMesh = controller.mesh;
-      const nextMesh = createBlockMesh(
-        controller.type,
-        1,
-        createBlockMaterial(controller.type, controller.color),
-        'carrier',
-      );
-      nextMesh.castShadow = true;
-      nextMesh.receiveShadow = true;
-      nextMesh.position.copy(oldMesh.position);
-      nextMesh.rotation.copy(oldMesh.rotation);
-      nextMesh.visible = oldMesh.visible;
-      nextMesh.add(controller.countSprite);
-      controller.mesh = nextMesh;
-      scene.add(nextMesh);
-      scene.remove(oldMesh);
-      worldInventory.replaceCarrierMesh(id, oldMesh, nextMesh);
-      disposeObject3D(oldMesh);
-
-      for (const projectile of controller.projectiles) {
-        if (!projectile || !projectile.mesh) {
-          continue;
-        }
-        const oldProjectileMesh = projectile.mesh;
-        const nextProjectileMesh = createBlockMesh(
-          controller.type,
-          0.32,
-          createBlockMaterial(controller.type, controller.color),
-          'piece',
-        );
-        nextProjectileMesh.castShadow = true;
-        nextProjectileMesh.receiveShadow = true;
-        nextProjectileMesh.position.copy(oldProjectileMesh.position);
-        nextProjectileMesh.rotation.copy(oldProjectileMesh.rotation);
-        nextProjectileMesh.visible = oldProjectileMesh.visible;
-        projectile.mesh = nextProjectileMesh;
-        scene.add(nextProjectileMesh);
-        scene.remove(oldProjectileMesh);
-        disposeObject3D(oldProjectileMesh);
-      }
+      controller.rebuildMeshes();
     }
   }
 
@@ -4363,7 +4825,6 @@
     const inventoryZoneXInput = document.getElementById('inventory-zone-x');
     const inventoryZoneZInput = document.getElementById('inventory-zone-z');
     const levelSelect = document.getElementById('level-select');
-    const levelNameInput = document.getElementById('level-name');
     const levelLoadBtn = document.getElementById('level-load');
     const levelSaveFileBtn = document.getElementById('level-save-file');
     const levelOpenFileBtn = document.getElementById('level-open-file');
@@ -4372,7 +4833,8 @@
     const railEnabledInput = document.getElementById('rail-enabled');
     const railTypeSelect = document.getElementById('rail-type');
     const railRotSelect = document.getElementById('rail-rot');
-    const railRingSizeSelect = document.getElementById('rail-ring-size');
+    const railRingSizeXSelect = document.getElementById('rail-ring-size-x');
+    const railRingSizeYSelect = document.getElementById('rail-ring-size-y');
     const minecartSpeedInput = document.getElementById('minecart-speed');
     const railClearBtn = document.getElementById('rail-clear');
     const railAutoBtn = document.getElementById('rail-auto');
@@ -4514,31 +4976,18 @@
         return;
       }
       levelSelect.innerHTML = '';
-      for (const level of LEVEL_CATALOG) {
+      const visibleLevels = LEVEL_CATALOG.filter(isProjectLevel);
+      const levelsToRender = visibleLevels.length > 0 ? visibleLevels : LEVEL_CATALOG.filter((level) => level && level.id === FALLBACK_LEVEL_DEF.id);
+      for (const level of levelsToRender) {
         if (!level || !level.id) {
           continue;
         }
         const option = document.createElement('option');
         option.value = level.id;
-        option.textContent = level.name || level.id;
+        option.textContent = getProjectLevelLabel(level);
         levelSelect.appendChild(option);
       }
       levelSelect.value = activeLevelId;
-    }
-
-    function getActiveLevelName() {
-      const current = LEVELS_BY_ID.get(activeLevelId);
-      if (current && current.name) {
-        return String(current.name);
-      }
-      return String(activeLevelId || '');
-    }
-
-    function syncLevelNameInput() {
-      if (!levelNameInput) {
-        return;
-      }
-      levelNameInput.value = getActiveLevelName();
     }
 
     function setCameraInputsFromState() {
@@ -4625,7 +5074,7 @@
 
       const sceneData = {
         blocks: normalizeBlocks(levelData.blocks),
-        rails: levelRails.length > 0 ? levelRails : getDefaultUserRails(railLoopSize),
+        rails: levelRails.length > 0 ? levelRails : getDefaultUserRails({ x: railLoopSizeX, y: railLoopSizeY }),
       };
       editor.loadJSON(sceneData);
       buildManager.loadFromLevel({ blocks: sceneData.blocks });
@@ -4650,7 +5099,6 @@
       if (levelSelect) {
         levelSelect.value = activeLevelId;
       }
-      syncLevelNameInput();
     }
 
     function applySceneSnapshotToRuntime(snapshot, options) {
@@ -4663,9 +5111,13 @@
         blocks: normalized.blocks,
         rails: normalized.rails,
       };
-      railLoopSize = normalized.railLoopSize;
-      if (railRingSizeSelect) {
-        railRingSizeSelect.value = railLoopSize;
+      railLoopSizeX = normalized.railLoopSizeX;
+      railLoopSizeY = normalized.railLoopSizeY;
+      if (railRingSizeXSelect) {
+        railRingSizeXSelect.value = railLoopSizeX;
+      }
+      if (railRingSizeYSelect) {
+        railRingSizeYSelect.value = railLoopSizeY;
       }
       editor.loadJSON(sceneData);
       buildManager.loadFromLevel({ blocks: normalized.buildTargetBlocks });
@@ -4704,53 +5156,26 @@
       if (levelSelect) {
         levelSelect.value = activeLevelId;
       }
-      syncLevelNameInput();
       return true;
     }
 
     function buildCurrentLevelPayload() {
-      const typedName = levelNameInput ? String(levelNameInput.value || '').trim() : '';
-      const resolvedName = typedName || getNextIncrementalLevelName();
-      const baseId = toSlug(resolvedName, 'new_level');
+      const current = LEVELS_BY_ID.get(activeLevelId);
+      const resolvedName = current && current.name
+        ? String(current.name).trim()
+        : String(activeLevelId || '').trim();
+      const safeName = resolvedName || getNextIncrementalLevelName();
+      const stableId = activeLevelId && LEVELS_BY_ID.has(activeLevelId)
+        ? activeLevelId
+        : toSlug(safeName, 'new_level');
       return {
-        id: baseId,
-        name: resolvedName,
+        id: stableId,
+        name: safeName,
         blocks: getEditorBlocksSnapshot(),
         rails: normalizeRails(railEditor.exportData()),
         minecart: { speed: minecart.getSpeed() },
         camera: exportCameraDebugState(),
       };
-    }
-
-    function commitLevelName() {
-      if (!levelNameInput) {
-        return;
-      }
-      const typedName = String(levelNameInput.value || '').trim();
-      if (!typedName) {
-        return;
-      }
-      const renamedId = toSlug(typedName, activeLevelId || 'level');
-      const payload = {
-        id: renamedId,
-        name: typedName,
-        blocks: getEditorBlocksSnapshot(),
-        rails: normalizeRails(railEditor.exportData()),
-        minecart: { speed: minecart.getSpeed() },
-        camera: exportCameraDebugState(),
-      };
-      const previousId = activeLevelId;
-      activeLevelId = payload.id;
-      if (previousId !== payload.id) {
-        LEVELS_BY_ID.delete(previousId);
-      }
-      upsertRuntimeLevel(payload);
-      populateLevelSelect();
-      if (levelSelect) {
-        levelSelect.value = activeLevelId;
-      }
-      syncLevelNameInput();
-      saveSceneLayout();
     }
 
     enabledInput.addEventListener('change', () => {
@@ -4831,32 +5256,30 @@
         loadSelectedLevel(levelSelect.value);
       });
     }
-    if (levelNameInput) {
-      levelNameInput.addEventListener('change', commitLevelName);
-      levelNameInput.addEventListener('blur', commitLevelName);
+    if (levelSelect) {
+      levelSelect.addEventListener('change', () => {
+        if (activeBlockId !== null) {
+          return;
+        }
+        loadSelectedLevel(levelSelect.value);
+      });
     }
 
     if (levelSaveFileBtn) {
       levelSaveFileBtn.addEventListener('click', async () => {
         const payload = buildCurrentLevelPayload();
-        const previousId = activeLevelId;
         activeLevelId = payload.id;
-        if (previousId !== payload.id) {
-          LEVELS_BY_ID.delete(previousId);
-        }
         upsertRuntimeLevel(payload);
         populateLevelSelect();
         if (levelSelect) {
           levelSelect.value = activeLevelId;
         }
-        syncLevelNameInput();
         const moduleText = [
           '(function () {',
           `  window.registerMinecraftLevel(${JSON.stringify(payload, null, 2)});`,
           '})();',
         ].join('\n');
-        const baseName = toSlug(payload.name, 'level');
-        const filename = `${baseName}.js`;
+        const filename = 'finder.js';
         await saveTextToFile(filename, moduleText, 'text/javascript;charset=utf-8', ['.js']);
         saveSceneLayout();
       });
@@ -4928,10 +5351,17 @@
     railRotSelect.addEventListener('change', () => {
       railEditor.setRotationDeg(Number(railRotSelect.value));
     });
-    if (railRingSizeSelect) {
-      railRingSizeSelect.addEventListener('change', () => {
-        railLoopSize = normalizeRailLoopSize(railRingSizeSelect.value);
-        railRingSizeSelect.value = railLoopSize;
+    if (railRingSizeXSelect) {
+      railRingSizeXSelect.addEventListener('change', () => {
+        railLoopSizeX = normalizeRailLoopSizeValue(railRingSizeXSelect.value);
+        railRingSizeXSelect.value = railLoopSizeX;
+        saveSceneLayout();
+      });
+    }
+    if (railRingSizeYSelect) {
+      railRingSizeYSelect.addEventListener('change', () => {
+        railLoopSizeY = normalizeRailLoopSizeValue(railRingSizeYSelect.value);
+        railRingSizeYSelect.value = railLoopSizeY;
         saveSceneLayout();
       });
     }
@@ -5122,7 +5552,6 @@
     if (levelSelect) {
       levelSelect.value = activeLevelId;
     }
-    syncLevelNameInput();
     const selectedShapeOption = shapeOptions.find((option) => option.value === shapeDropdownApi.getValue()) || null;
     const selectedPropOption = propsOptions.find((option) => option.value === propsDropdownApi.getValue()) || null;
     if (selectedPropOption && selectedPropOption.value !== PROP_NONE_VALUE) {
@@ -5141,8 +5570,11 @@
     editor.setLayer(0);
     railEditor.setType(railTypeSelect.value);
     railEditor.setRotationDeg(Number(railRotSelect.value));
-    if (railRingSizeSelect) {
-      railRingSizeSelect.value = railLoopSize;
+    if (railRingSizeXSelect) {
+      railRingSizeXSelect.value = railLoopSizeX;
+    }
+    if (railRingSizeYSelect) {
+      railRingSizeYSelect.value = railLoopSizeY;
     }
     minecartSpeedInput.value = String(minecart.getSpeed());
     syncCameraInputsFromState = setCameraInputsFromState;
@@ -5163,6 +5595,7 @@
 
   function step(dt) {
     updateFlyCamera(dt);
+    editor.update(dt);
     minecart.update(dt);
     removeDoorShowcase(scene);
     ensureDoorShowcaseNearMinecart(scene, minecart);
@@ -5264,11 +5697,6 @@
   });
 
   canvas.addEventListener('pointerdown', (event) => {
-    if (flyCamEnabled && event.button === 2) {
-      flyLookActive = true;
-      canvas.setPointerCapture(event.pointerId);
-      return;
-    }
     if (railEditor.isEnabled()) {
       if (event.button === 0) {
         railEditor.placeAtEvent(event);
@@ -5277,10 +5705,15 @@
       }
       return;
     }
-    if (event.button === 2) {
+    if (event.button === 2 && editor.isEnabled()) {
       if (editor.removeAtEvent(event)) {
         saveSceneLayout();
       }
+      return;
+    }
+    if (flyCamEnabled && event.button === 2) {
+      flyLookActive = true;
+      canvas.setPointerCapture(event.pointerId);
       return;
     }
     if (event.button !== 0) {
@@ -5361,6 +5794,7 @@
     clearFlyMoveState();
   });
 
+  syncBlockCountsFromLevel();
   refreshUiLockState();
   editor.onChange = handleEditorBlocksChange;
   applyUiVisibility();
