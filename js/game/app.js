@@ -1,6 +1,8 @@
 (function () {
   const CARRIER_GEOMETRY = new THREE.BoxGeometry(1, 1, 1);
   const PIECE_GEOMETRY = new THREE.BoxGeometry(0.32, 0.32, 0.32);
+  const IMPACT_BURST_GEOMETRY = new THREE.SphereGeometry(1, 8, 8);
+  const IMPACT_RING_GEOMETRY = new THREE.RingGeometry(0.55, 0.78, 28);
 
   const TEMP_A = new THREE.Vector3();
   const TEMP_B = new THREE.Vector3();
@@ -1858,6 +1860,30 @@
           (minZ + maxZ) * 0.5,
         );
 
+        const orderedSlots = this.slots
+          .map((slot, index) => {
+            const dx = slot.position.x - this.center.x;
+            const dz = slot.position.z - this.center.z;
+            return {
+              index,
+              y: slot.position.y,
+              ring: Math.max(Math.abs(dx), Math.abs(dz)),
+              angle: Math.atan2(dz, dx),
+              radialSq: (dx * dx) + (dz * dz),
+            };
+          })
+          .sort((a, b) => (
+            (a.y - b.y)
+            || (b.ring - a.ring)
+            || (a.angle - b.angle)
+            || (a.radialSq - b.radialSq)
+            || (a.index - b.index)
+          ));
+
+        for (let rank = 0; rank < orderedSlots.length; rank += 1) {
+          this.slots[orderedSlots[rank].index].buildOrder = rank;
+        }
+
         const pad = this.cellSize * 1.1;
         const width = Math.max(this.cellSize, (maxX - minX) + this.cellSize + pad);
         const depth = Math.max(this.cellSize, (maxZ - minZ) + this.cellSize + pad);
@@ -1878,15 +1904,37 @@
     }
 
     reserveNext(inventoryKey, origin = null, forward = null) {
+      void forward;
       let selectedIndex = -1;
+      let selectedOrder = Infinity;
       let selectedDistanceSq = Infinity;
-      const maxNearbyDistanceSq = (this.cellSize * 2.35) * (this.cellSize * 2.35);
       const hasOrigin = origin && Number.isFinite(origin.x) && Number.isFinite(origin.z);
+      const EPS_Y = this.cellSize * 0.01;
+
+      let globalMinFreeY = Infinity;
+      for (let i = 0; i < this.slots.length; i += 1) {
+        const slot = this.slots[i];
+        if (slot.state !== 'free') {
+          continue;
+        }
+        if (slot.position.y < globalMinFreeY) {
+          globalMinFreeY = slot.position.y;
+        }
+      }
+      if (!Number.isFinite(globalMinFreeY)) {
+        return null;
+      }
+
       const sideX = hasOrigin ? origin.x - this.center.x : 0;
       const sideZ = hasOrigin ? origin.z - this.center.z : 0;
       const sideLen = Math.hypot(sideX, sideZ);
       const nx = sideLen > 1e-6 ? sideX / sideLen : 0;
       const nz = sideLen > 1e-6 ? sideZ / sideLen : 0;
+      // Half-plane constraint: target must be on the same opposite side as the minecart,
+      // but without a narrow cone that can miss slots during motion.
+      const minSectorCos = 0;
+      const minOuterBand = this.cellSize * 0.58;
+
       for (let i = 0; i < this.slots.length; i += 1) {
         const slot = this.slots[i];
         if (slot.state !== 'free') {
@@ -1895,61 +1943,32 @@
         if (slot.inventoryKey !== inventoryKey) {
           continue;
         }
-        if (hasOrigin) {
+        // Strict bottom-up build: nothing above the lowest free layer may be placed.
+        if (slot.position.y > globalMinFreeY + EPS_Y) {
+          continue;
+        }
+
+        // Shoot only into the sector directly opposite the current minecart side.
+        if (hasOrigin && sideLen > 1e-6) {
           const slotSideX = slot.position.x - this.center.x;
           const slotSideZ = slot.position.z - this.center.z;
-          const sideDot = (slotSideX * sideX) + (slotSideZ * sideZ);
-          if (sideDot < 0) {
-            continue;
-          }
-          // Keep targets only on the same visible side and close to its outer band.
-          const slotSideLen = Math.hypot(slotSideX, slotSideZ);
-          if (slotSideLen < this.cellSize * 1.2) {
-            continue;
-          }
-          if (slotSideLen > 1e-6 && sideLen > 1e-6) {
-            const sx = slotSideX / slotSideLen;
-            const sz = slotSideZ / slotSideLen;
-            const cosAngle = (sx * nx) + (sz * nz);
-            if (cosAngle < 0.9) {
-              continue;
-            }
-            const sideProjection = (slotSideX * nx) + (slotSideZ * nz);
-            if (sideProjection < sideLen * 0.6) {
+          const slotLen = Math.hypot(slotSideX, slotSideZ);
+          if (slotLen >= minOuterBand) {
+            const sx = slotSideX / slotLen;
+            const sz = slotSideZ / slotLen;
+            const sectorCos = (sx * nx) + (sz * nz);
+            if (sectorCos < minSectorCos) {
               continue;
             }
           }
         }
-        const dx = hasOrigin ? (slot.position.x - origin.x) : (slot.position.x - this.center.x);
-        const dz = hasOrigin ? (slot.position.z - origin.z) : (slot.position.z - this.center.z);
-        const distanceSq = (dx * dx) + (dz * dz);
-        if (hasOrigin && distanceSq > maxNearbyDistanceSq) {
-          continue;
-        }
-        if (distanceSq < selectedDistanceSq) {
-          selectedDistanceSq = distanceSq;
-          selectedIndex = i;
-        }
-      }
-      if (selectedIndex >= 0) {
-        this.slots[selectedIndex].state = 'reserved';
-        return { index: selectedIndex, position: this.slots[selectedIndex].position.clone() };
-      }
 
-      // Fallback for compact/custom levels: if strict side/range filters reject everything,
-      // still reserve the nearest matching slot so projectile dispatch remains functional.
-      for (let i = 0; i < this.slots.length; i += 1) {
-        const slot = this.slots[i];
-        if (slot.state !== 'free') {
-          continue;
-        }
-        if (slot.inventoryKey !== inventoryKey) {
-          continue;
-        }
         const dx = hasOrigin ? (slot.position.x - origin.x) : (slot.position.x - this.center.x);
         const dz = hasOrigin ? (slot.position.z - origin.z) : (slot.position.z - this.center.z);
         const distanceSq = (dx * dx) + (dz * dz);
-        if (distanceSq < selectedDistanceSq) {
+        const order = Number.isFinite(slot.buildOrder) ? slot.buildOrder : Number.MAX_SAFE_INTEGER;
+        if (order < selectedOrder || (order === selectedOrder && distanceSq < selectedDistanceSq)) {
+          selectedOrder = order;
           selectedDistanceSq = distanceSq;
           selectedIndex = i;
         }
@@ -1965,9 +1984,37 @@
       return this.slots.some((slot) => slot.state === 'free' && slot.inventoryKey === inventoryKey);
     }
 
+    hasPlaceableSlotForType(inventoryKey) {
+      let globalMinFreeY = Infinity;
+      for (const slot of this.slots) {
+        if (slot.state !== 'free') {
+          continue;
+        }
+        if (slot.position.y < globalMinFreeY) {
+          globalMinFreeY = slot.position.y;
+        }
+      }
+      if (!Number.isFinite(globalMinFreeY)) {
+        return false;
+      }
+      const EPS_Y = this.cellSize * 0.01;
+      return this.slots.some((slot) => (
+        slot.state === 'free'
+        && slot.inventoryKey === inventoryKey
+        && slot.position.y <= globalMinFreeY + EPS_Y
+      ));
+    }
+
     commit(index) {
       const slot = this.slots[index];
-      if (!slot || slot.state !== 'reserved') {
+      if (!slot) {
+        return false;
+      }
+      // Keep placement resilient to race/order glitches when projectile reaches target.
+      if (slot.state === 'built') {
+        return true;
+      }
+      if (slot.state !== 'reserved' && slot.state !== 'free') {
         return false;
       }
 
@@ -2457,6 +2504,7 @@
       this.returnFrom = new THREE.Vector3();
 
       this.projectiles = [];
+      this.impactBursts = [];
 
       this.mesh = this.createCarrierMesh();
       this.mesh.castShadow = true;
@@ -2528,6 +2576,7 @@
         nextProjectileMesh.receiveShadow = true;
         nextProjectileMesh.position.copy(oldProjectileMesh.position);
         nextProjectileMesh.rotation.copy(oldProjectileMesh.rotation);
+        nextProjectileMesh.scale.copy(oldProjectileMesh.scale);
         nextProjectileMesh.visible = oldProjectileMesh.visible;
         projectile.mesh = nextProjectileMesh;
         this.scene.add(nextProjectileMesh);
@@ -2564,7 +2613,10 @@
     }
 
     canStartCycle() {
-      return this.state === 'idle' && this.count > 0 && !this.minecart.isMoving();
+      return this.state === 'idle'
+        && this.count > 0
+        && !this.minecart.isMoving()
+        && this.buildManager.hasPlaceableSlotForType(this.id);
     }
 
     getCount() {
@@ -2600,6 +2652,7 @@
 
     update(dt) {
       this.updateProjectiles(dt);
+      this.updateImpactBursts(dt);
 
       if (this.state === 'launching') {
         this.updateLaunching(dt);
@@ -2640,7 +2693,7 @@
 
     updateDispatching(dt) {
       this.phaseTime += dt;
-      if (this.count <= 0 || !this.buildManager.hasFreeSlotForType(this.id)) {
+      if (this.count <= 0 || !this.buildManager.hasPlaceableSlotForType(this.id)) {
         this.phaseTime = this.dispatchDuration;
       }
 
@@ -2659,6 +2712,8 @@
           break;
         }
         if (spawnResult === 'waiting-side') {
+          // Retry quickly while the cart moves so we don't miss short side windows.
+          this.spawnTimer = this.spawnInterval;
           break;
         }
       }
@@ -2710,7 +2765,7 @@
         return 'depleted';
       }
 
-      if (!this.buildManager.hasFreeSlotForType(this.id)) {
+      if (!this.buildManager.hasPlaceableSlotForType(this.id)) {
         return 'finished';
       }
 
@@ -2733,16 +2788,26 @@
       );
       piece.castShadow = true;
       piece.receiveShadow = true;
-      piece.position.copy(origin || this.mesh.position);
+      const from = (origin || this.mesh.position).clone();
+      piece.position.copy(from);
+      piece.scale.set(1.24, 0.72, 1.24);
       this.scene.add(piece);
+
+      const distance = from.distanceTo(reserved.position);
+      const important = this.isImportantBlockType();
+      const trail = this.createProjectileTrail(from, important);
 
       this.projectiles.push({
         mesh: piece,
-        from: (origin || this.mesh.position).clone(),
+        from,
         to: reserved.position,
         index: reserved.index,
         progress: 0,
-        duration: 0.09,
+        duration: Math.min(0.24, 0.09 + distance * 0.015),
+        arcHeight: 0,
+        important,
+        trail,
+        targetScale: this.getProjectileTargetScale(),
       });
 
       return 'spawned';
@@ -2754,6 +2819,8 @@
         projectile.progress += dt / projectile.duration;
 
         if (projectile.progress >= 1) {
+          this.spawnImpactBurst(projectile.to, projectile.important);
+          this.disposeProjectileTrail(projectile);
           this.scene.remove(projectile.mesh);
           disposeObject3D(projectile.mesh);
           this.buildManager.commit(projectile.index);
@@ -2761,8 +2828,160 @@
           continue;
         }
 
-        const eased = easeOutCubic(projectile.progress);
+        const t = Math.min(1, Math.max(0, projectile.progress));
+        const eased = t;
         projectile.mesh.position.lerpVectors(projectile.from, projectile.to, eased);
+        const growth = Math.min(1, Math.pow(t * 1.08, 0.68));
+        const baseScale = lerp(1, projectile.targetScale, growth);
+        const squashIntro = t < 0.12 ? (1 - (t / 0.12)) : 0;
+        const settleKick = t > 0.84
+          ? Math.sin(((t - 0.84) / 0.16) * Math.PI) * (projectile.important ? 0.22 : 0.14)
+          : 0;
+        const sxz = baseScale * (1 + squashIntro * 0.2 + settleKick);
+        const sy = baseScale * (1 - squashIntro * 0.24 - settleKick * 0.34);
+        projectile.mesh.scale.set(sxz, Math.max(0.18, sy), sxz);
+
+        this.updateProjectileTrail(projectile);
+      }
+    }
+
+    isImportantBlockType() {
+      const blockDef = getBlockDefinition(this.type);
+      const shape = blockDef && blockDef.shape ? blockDef.shape : 'cube';
+      return shape === 'door'
+        || shape === 'pillar'
+        || this.type === 'lantern'
+        || getEditorGroup(blockDef) === EDITOR_GROUP_PROPS;
+    }
+
+    getProjectileTargetScale() {
+      const blockDef = getBlockDefinition(this.type);
+      const shape = blockDef && blockDef.shape ? blockDef.shape : 'cube';
+      if (shape === 'slab') {
+        return 2.35;
+      }
+      if (shape === 'door') {
+        return 3.65;
+      }
+      if (shape === 'pillar' || shape === 'stairs' || shape === 'water') {
+        return 4.05;
+      }
+      return 3.12;
+    }
+
+    createProjectileTrail(startPosition, important) {
+      const points = [];
+      const pointCount = important ? 9 : 7;
+      for (let i = 0; i < pointCount; i += 1) {
+        points.push(startPosition.clone());
+      }
+
+      const geometry = new THREE.BufferGeometry().setFromPoints(points);
+      const material = new THREE.LineBasicMaterial({
+        color: important ? 0xffcf74 : 0xa9d9ff,
+        transparent: true,
+        opacity: important ? 0.96 : 0.72,
+        depthWrite: false,
+      });
+      const line = new THREE.Line(geometry, material);
+      this.scene.add(line);
+
+      return { line, geometry, material, points };
+    }
+
+    updateProjectileTrail(projectile) {
+      const trail = projectile && projectile.trail;
+      if (!trail) {
+        return;
+      }
+
+      const points = trail.points;
+      for (let i = 0; i < points.length - 1; i += 1) {
+        points[i].copy(points[i + 1]);
+      }
+      points[points.length - 1].copy(projectile.mesh.position);
+      trail.geometry.setFromPoints(points);
+      trail.material.opacity = (1 - projectile.progress) * (projectile.important ? 0.96 : 0.72);
+    }
+
+    disposeProjectileTrail(projectile) {
+      const trail = projectile && projectile.trail;
+      if (!trail) {
+        return;
+      }
+      this.scene.remove(trail.line);
+      trail.geometry.dispose();
+      trail.material.dispose();
+      projectile.trail = null;
+    }
+
+    spawnImpactBurst(position, important) {
+      const material = new THREE.MeshBasicMaterial({
+        color: important ? 0xffb347 : 0xffffff,
+        transparent: true,
+        opacity: important ? 0.95 : 0.78,
+        depthWrite: false,
+      });
+      const burst = new THREE.Mesh(IMPACT_BURST_GEOMETRY, material);
+      burst.position.copy(position);
+      burst.scale.setScalar(0.14);
+      this.scene.add(burst);
+
+      const ringMaterial = new THREE.MeshBasicMaterial({
+        color: important ? 0xffcf74 : 0xb9ecff,
+        transparent: true,
+        opacity: important ? 0.82 : 0.62,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const ring = new THREE.Mesh(IMPACT_RING_GEOMETRY, ringMaterial);
+      ring.rotation.x = -Math.PI * 0.5;
+      ring.position.copy(position);
+      ring.position.y += 0.02;
+      ring.scale.setScalar(0.22);
+      this.scene.add(ring);
+
+      this.impactBursts.push({
+        mesh: burst,
+        material,
+        ring,
+        ringMaterial,
+        life: 0,
+        duration: important ? 0.34 : 0.26,
+        maxScale: important ? 0.86 : 0.62,
+      });
+    }
+
+    updateImpactBursts(dt) {
+      for (let i = this.impactBursts.length - 1; i >= 0; i -= 1) {
+        const burst = this.impactBursts[i];
+        burst.life += dt;
+        const t = burst.life / burst.duration;
+
+        if (t >= 1) {
+          this.scene.remove(burst.mesh);
+          burst.material.dispose();
+          if (burst.ring) {
+            this.scene.remove(burst.ring);
+          }
+          if (burst.ringMaterial) {
+            burst.ringMaterial.dispose();
+          }
+          this.impactBursts.splice(i, 1);
+          continue;
+        }
+
+        const eased = easeOutCubic(Math.max(0, Math.min(1, t)));
+        const scale = lerp(0.14, burst.maxScale, eased);
+        burst.mesh.scale.setScalar(scale);
+        burst.mesh.position.y += dt * 0.24;
+        burst.material.opacity = (1 - eased) * 0.85;
+        if (burst.ring && burst.ringMaterial) {
+          const ringScale = lerp(0.22, burst.maxScale * 2.25, eased);
+          burst.ring.scale.setScalar(ringScale);
+          burst.ring.position.y += dt * 0.04;
+          burst.ringMaterial.opacity = (1 - eased) * 0.8;
+        }
       }
     }
 
