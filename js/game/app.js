@@ -2074,21 +2074,21 @@
       this.interactiveMeshes = [];
       this.pointerRaycaster = new THREE.Raycaster();
       this.pointerNdc = new THREE.Vector2();
+      this.layoutSpacing = 2.55;
+      this.layoutBaseZ = -9.8;
 
       const layout = slotConfigs.filter((config) => !config.empty);
-      const spacing = 2.55;
-      const startX = -((layout.length - 1) * spacing) * 0.5;
-      const baseZ = -9.8;
+      const startX = -((layout.length - 1) * this.layoutSpacing) * 0.5;
 
       for (let i = 0; i < layout.length; i += 1) {
         const config = layout[i];
-        const slotX = startX + i * spacing;
+        const slotX = startX + i * this.layoutSpacing;
 
         const clickPad = new THREE.Mesh(
           new THREE.BoxGeometry(1.8, 1, 1.8),
           new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
         );
-        clickPad.position.set(slotX, 0.5, baseZ);
+        clickPad.position.set(slotX, 0.5, this.layoutBaseZ);
         clickPad.userData.blockId = config.id;
         this.group.add(clickPad);
 
@@ -2096,9 +2096,10 @@
         this.slots.set(config.id, {
           id: config.id,
           clickPad,
-          anchor: new THREE.Vector3(slotX, 1.02, baseZ),
+          anchor: new THREE.Vector3(slotX, 1.02, this.layoutBaseZ),
           disabled: false,
           locked: false,
+          visible: true,
         });
       }
 
@@ -2114,6 +2115,45 @@
         return;
       }
       this.group.position.set(x, 0, z);
+    }
+
+    setGroupYawDeg(deg) {
+      const safeDeg = Number.isFinite(Number(deg)) ? Number(deg) : 0;
+      this.group.rotation.y = (safeDeg * Math.PI) / 180;
+    }
+
+    setVisibleSlots(ids) {
+      const visibleSet = new Set(Array.isArray(ids) ? ids : []);
+      const ordered = [];
+      for (const slot of this.slots.values()) {
+        if (visibleSet.has(slot.id)) {
+          ordered.push(slot);
+        }
+      }
+      if (ordered.length === 0) {
+        for (const slot of this.slots.values()) {
+          ordered.push(slot);
+        }
+      }
+      const startX = -((ordered.length - 1) * this.layoutSpacing) * 0.5;
+      for (let i = 0; i < ordered.length; i += 1) {
+        const slot = ordered[i];
+        const slotX = startX + i * this.layoutSpacing;
+        slot.anchor.set(slotX, 1.02, this.layoutBaseZ);
+        slot.clickPad.position.set(slotX, 0.5, this.layoutBaseZ);
+        slot.visible = true;
+        slot.clickPad.visible = true;
+      }
+      for (const slot of this.slots.values()) {
+        if (ordered.includes(slot)) {
+          continue;
+        }
+        slot.visible = false;
+        slot.clickPad.visible = false;
+      }
+      for (const slot of this.slots.values()) {
+        this.applySlotState(slot);
+      }
     }
 
     getSlotAnchor(id) {
@@ -2168,7 +2208,7 @@
     }
 
     applySlotState(slot) {
-      const blocked = slot.disabled || slot.locked;
+      const blocked = slot.disabled || slot.locked || !slot.visible;
       slot.clickPad.userData.blocked = blocked;
     }
 
@@ -3265,13 +3305,20 @@
   }
   const debugEditor = document.getElementById('debug-editor');
   const inventoryMoveEnabledInput = document.getElementById('inventory-move-enabled');
+  const DEFAULT_INVENTORY_ZONE = {
+    x: 19.84,
+    z: 0.0,
+    angleDeg: 90,
+  };
   let uiHidden = false;
   let flyCamEnabled = false;
   let flyCamRestoreState = null;
   let syncCameraInputsFromState = null;
   let flyLookActive = false;
   let inventoryMoveEnabled = false;
-  let inventorySpinAngleDeg = 0;
+  let inventorySpinAngleDeg = DEFAULT_INVENTORY_ZONE.angleDeg;
+  let inventoryZoneX = DEFAULT_INVENTORY_ZONE.x;
+  let inventoryZoneZ = DEFAULT_INVENTORY_ZONE.z;
   let draggingInventory = false;
   const inventoryDragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   const inventoryDragPoint = new THREE.Vector3();
@@ -3948,7 +3995,10 @@
     const speed = Number(raw.minecart && raw.minecart.speed);
     const inventoryX = Number(raw.inventory && raw.inventory.x);
     const inventoryZ = Number(raw.inventory && raw.inventory.z);
-    const inventorySpinAngleDeg = normalizeSpinAngleDeg(raw.inventory && raw.inventory.spinAngleDeg);
+    const hasInventoryAngle = raw.inventory && raw.inventory.spinAngleDeg !== undefined;
+    const inventorySpinAngleDeg = hasInventoryAngle
+      ? normalizeSpinAngleDeg(raw.inventory.spinAngleDeg)
+      : DEFAULT_INVENTORY_ZONE.angleDeg;
     const cameraSettings = normalizeCameraSettings(raw.camera);
     const effectiveBlocks = hasBlocksField ? blocks : normalizeBlocks(levelData.blocks);
     const effectiveBuildTargetBlocks = hasBuildTargetField
@@ -3962,8 +4012,8 @@
       rails: rails.length > 0 ? rails : (normalizeRails(levelData.rails).length > 0 ? normalizeRails(levelData.rails) : getDefaultUserRails(snapshotRailLoopSize)),
       minecartSpeed: Number.isFinite(speed) && speed > 0 ? speed : levelData.minecartSpeed,
       inventoryPosition: {
-        x: Number.isFinite(inventoryX) ? inventoryX : 0,
-        z: Number.isFinite(inventoryZ) ? inventoryZ : 0,
+        x: Number.isFinite(inventoryX) ? inventoryX : DEFAULT_INVENTORY_ZONE.x,
+        z: Number.isFinite(inventoryZ) ? inventoryZ : DEFAULT_INVENTORY_ZONE.z,
       },
       inventorySpinAngleDeg,
       camera: cameraSettings || normalizeCameraSettings(levelData.camera),
@@ -4063,6 +4113,9 @@
         railEditor.loadData(sceneData.rails);
         trackController.setRailLayout(railEditor.exportData());
         minecart.setSpeed(normalized.minecartSpeed);
+        inventoryZoneX = normalized.inventoryPosition.x;
+        inventoryZoneZ = normalized.inventoryPosition.z;
+        inventorySpinAngleDeg = normalizeSpinAngleDeg(normalized.inventorySpinAngleDeg);
         if (normalized.camera) {
           Object.assign(cameraDebugState, normalized.camera);
           applyCameraDebugState();
@@ -4093,7 +4146,6 @@
         railEditor.loadData(sceneData.rails);
         trackController.setRailLayout(railEditor.exportData());
         minecart.setSpeed(levelData.minecartSpeed);
-        saveSceneLayout();
         return true;
       }
     } catch (error) {
@@ -4176,6 +4228,7 @@
   }
 
   const worldInventory = new WorldInventoryController(scene, camera, BLOCK_CONFIGS);
+  worldInventory.setGroupPosition(inventoryZoneX, inventoryZoneZ);
   const blocks = new Map();
   const initialCountsByType = getLevelCountsByType();
 
@@ -4196,12 +4249,8 @@
   }
 
   function applyInventorySpinAngle() {
-    for (const controller of blocks.values()) {
-      if (!controller) {
-        continue;
-      }
-      controller.setIdleYawOffsetDeg(inventorySpinAngleDeg);
-    }
+    worldInventory.setGroupYawDeg(inventorySpinAngleDeg);
+    syncInventoryAnchors();
   }
 
   for (const config of BLOCK_CONFIGS) {
@@ -4212,7 +4261,7 @@
       id: config.id,
       type: config.type,
       color: config.color,
-      count: initialCountsByType[config.type] || 0,
+      count: initialCountsByType[config.id] || 0,
       onCountChange: handleCountChange,
       onCycleFinish: handleCycleFinish,
     });
@@ -4224,14 +4273,26 @@
     worldInventory.registerCarrierMesh(config.id, controller.mesh);
     blocks.set(config.id, controller);
   }
+  worldInventory.setVisibleSlots(
+    BLOCK_CONFIGS
+      .map((config) => config.id)
+      .filter((id) => (initialCountsByType[id] || 0) > 0),
+  );
   syncInventoryAnchors();
   applyInventorySpinAngle();
 
   function syncBlockCountsFromLevel() {
     const countsByType = getLevelCountsByType();
+    const visibleIds = [];
     for (const controller of blocks.values()) {
-      controller.setCount(countsByType[controller.id] || 0);
+      const count = countsByType[controller.id] || 0;
+      controller.setCount(count);
+      if (count > 0) {
+        visibleIds.push(controller.id);
+      }
     }
+    worldInventory.setVisibleSlots(visibleIds);
+    syncInventoryAnchors();
   }
 
   function refreshUiLockState() {
@@ -4299,6 +4360,8 @@
     const textureSelectHost = document.getElementById('editor-texture-select');
     const blockRotYSelect = document.getElementById('editor-rot-y');
     const inventorySpinAngleInput = document.getElementById('inventory-spin-angle');
+    const inventoryZoneXInput = document.getElementById('inventory-zone-x');
+    const inventoryZoneZInput = document.getElementById('inventory-zone-z');
     const levelSelect = document.getElementById('level-select');
     const levelNameInput = document.getElementById('level-name');
     const levelLoadBtn = document.getElementById('level-load');
@@ -4610,12 +4673,22 @@
       trackController.setRailLayout(railEditor.exportData());
       minecart.setSpeed(normalized.minecartSpeed);
       minecartSpeedInput.value = String(minecart.getSpeed());
-      worldInventory.setGroupPosition(normalized.inventoryPosition.x, normalized.inventoryPosition.z);
+      inventoryZoneX = normalized.inventoryPosition.x;
+      inventoryZoneZ = normalized.inventoryPosition.z;
+      worldInventory.setGroupPosition(inventoryZoneX, inventoryZoneZ);
       inventorySpinAngleDeg = normalizeSpinAngleDeg(normalized.inventorySpinAngleDeg);
       applyInventorySpinAngle();
       syncInventoryAnchors();
       if (inventorySpinAngleInput) {
         inventorySpinAngleInput.value = String(inventorySpinAngleDeg);
+      }
+      const inventoryZoneXInput = document.getElementById('inventory-zone-x');
+      const inventoryZoneZInput = document.getElementById('inventory-zone-z');
+      if (inventoryZoneXInput) {
+        inventoryZoneXInput.value = inventoryZoneX.toFixed(2);
+      }
+      if (inventoryZoneZInput) {
+        inventoryZoneZInput.value = inventoryZoneZ.toFixed(2);
       }
       if (normalized.camera) {
         Object.assign(cameraDebugState, normalized.camera);
@@ -4704,6 +4777,47 @@
         inventorySpinAngleDeg = normalizeSpinAngleDeg(inventorySpinAngleInput.value);
         inventorySpinAngleInput.value = String(inventorySpinAngleDeg);
         applyInventorySpinAngle();
+        saveSceneLayout();
+      });
+    }
+    function syncInventoryZoneInputs() {
+      if (inventoryZoneXInput) {
+        inventoryZoneXInput.value = inventoryZoneX.toFixed(2);
+      }
+      if (inventoryZoneZInput) {
+        inventoryZoneZInput.value = inventoryZoneZ.toFixed(2);
+      }
+    }
+    function applyInventoryZonePosition() {
+      worldInventory.setGroupPosition(inventoryZoneX, inventoryZoneZ);
+      syncInventoryAnchors();
+    }
+    syncInventoryZoneInputs();
+    if (inventoryZoneXInput) {
+      inventoryZoneXInput.addEventListener('input', () => {
+        inventoryZoneX = toFiniteNumber(inventoryZoneXInput.value, inventoryZoneX);
+        applyInventoryZonePosition();
+        syncInventoryZoneInputs();
+        saveSceneLayout();
+      });
+      inventoryZoneXInput.addEventListener('change', () => {
+        inventoryZoneX = toFiniteNumber(inventoryZoneXInput.value, inventoryZoneX);
+        applyInventoryZonePosition();
+        syncInventoryZoneInputs();
+        saveSceneLayout();
+      });
+    }
+    if (inventoryZoneZInput) {
+      inventoryZoneZInput.addEventListener('input', () => {
+        inventoryZoneZ = toFiniteNumber(inventoryZoneZInput.value, inventoryZoneZ);
+        applyInventoryZonePosition();
+        syncInventoryZoneInputs();
+        saveSceneLayout();
+      });
+      inventoryZoneZInput.addEventListener('change', () => {
+        inventoryZoneZ = toFiniteNumber(inventoryZoneZInput.value, inventoryZoneZ);
+        applyInventoryZonePosition();
+        syncInventoryZoneInputs();
         saveSceneLayout();
       });
     }
@@ -5112,10 +5226,17 @@
     if (draggingInventory) {
       const hit = getPointerPlanePoint(event, inventoryDragPlane, inventoryDragPoint);
       if (hit) {
-        worldInventory.setGroupPosition(
-          inventoryDragPoint.x + inventoryDragOffset.x,
-          inventoryDragPoint.z + inventoryDragOffset.z,
-        );
+        inventoryZoneX = inventoryDragPoint.x + inventoryDragOffset.x;
+        inventoryZoneZ = inventoryDragPoint.z + inventoryDragOffset.z;
+        worldInventory.setGroupPosition(inventoryZoneX, inventoryZoneZ);
+        const inventoryZoneXInput = document.getElementById('inventory-zone-x');
+        const inventoryZoneZInput = document.getElementById('inventory-zone-z');
+        if (inventoryZoneXInput) {
+          inventoryZoneXInput.value = inventoryZoneX.toFixed(2);
+        }
+        if (inventoryZoneZInput) {
+          inventoryZoneZInput.value = inventoryZoneZ.toFixed(2);
+        }
         syncInventoryAnchors();
       }
       return;
