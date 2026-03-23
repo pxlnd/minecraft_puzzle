@@ -125,10 +125,11 @@
       id: 'door',
       label: 'Door',
       shape: 'door',
+      editorGroup: 'props',
       textureKey: 'wood',
       fallbackTexture: './assets/block/minecraft_oak_door_item.png',
-      doorTopTextureKey: 'wood',
-      doorBottomTextureKey: 'wood',
+      doorTopTextureKey: 'oak_door_top',
+      doorBottomTextureKey: 'oak_door_bottom',
       inventory: true,
       color: 0x8a6435,
     },
@@ -201,10 +202,29 @@
     stairs: 'Stairs',
     door: 'Door',
   };
+  const EDITOR_GROUP_PROPS = 'props';
+  function getEditorGroup(blockDef) {
+    if (!blockDef || typeof blockDef !== 'object') {
+      return 'blocks';
+    }
+    return blockDef.editorGroup === EDITOR_GROUP_PROPS ? EDITOR_GROUP_PROPS : 'blocks';
+  }
   const BLOCK_SHAPE_OPTIONS = [];
+  const PROP_EDITOR_OPTIONS = [];
   const BLOCK_SHAPE_SET = new Set();
   for (const blockDef of BLOCK_LIBRARY) {
     if (!blockDef || !blockDef.id) {
+      continue;
+    }
+    if (getEditorGroup(blockDef) === EDITOR_GROUP_PROPS) {
+      PROP_EDITOR_OPTIONS.push({
+        id: blockDef.id,
+        type: blockDef.id,
+        shape: blockDef.shape || 'cube',
+        label: blockDef.label || blockDef.id,
+        textureKey: blockDef.textureKey || '',
+        fallbackTexture: blockDef.fallbackTexture || '',
+      });
       continue;
     }
     const shape = blockDef.shape || 'cube';
@@ -260,20 +280,11 @@
       : EDITOR_TEXTURE_MODE_AUTO;
   }
   const doorBlockDef = getBlockDefinition('door');
-  const doorFallback = doorBlockDef ? doorBlockDef.fallbackTexture : './assets/block/minecraft_oak_door_item.png';
-  const doorTopPath = resolveTexturePath(
-    doorBlockDef ? doorBlockDef.doorTopTextureKey : 'doorTop',
-    './assets/oak_door_top.png',
-  ) || resolveTexturePath('door', doorFallback) || resolveTexturePath('wood', '');
-  const doorBottomPath = resolveTexturePath(
-    doorBlockDef ? doorBlockDef.doorBottomTextureKey : 'doorBottom',
-    './assets/oak_door_bottom.png',
-  ) || resolveTexturePath('door', doorFallback) || resolveTexturePath('wood', '');
+  const doorTopPath = './assets/oak_door_top.png';
+  const doorBottomPath = './assets/oak_door_bottom.png';
   const DOOR_TEXTURES = {
-    top: doorTopPath ? loadTexture(doorTopPath, { pixelated: true }) : (BLOCK_TEXTURES.wood || BLOCK_TEXTURES.stone),
-    bottom: doorBottomPath
-      ? loadTexture(doorBottomPath, { pixelated: true })
-      : (BLOCK_TEXTURES.wood || BLOCK_TEXTURES.stone),
+    top: loadTexture(doorTopPath, { pixelated: true }),
+    bottom: loadTexture(doorBottomPath, { pixelated: true }),
   };
   const DOOR_MODEL_PATH = './assets/minecraft_door.glb';
   const ENABLE_DOOR_GLB = true;
@@ -284,14 +295,15 @@
     failed: false,
   };
 
-  function createOpaqueDoorMaterial(texture) {
+  function createDoorMaterial(texture) {
     return new THREE.MeshStandardMaterial({
       map: texture || null,
-      color: 0xd2a36f,
+      color: texture ? 0xffffff : 0x8a6435,
       roughness: 0.88,
       metalness: 0.04,
-      transparent: false,
-      alphaTest: 0.2,
+      transparent: true,
+      alphaTest: 0.35,
+      depthWrite: false,
       side: THREE.DoubleSide,
     });
   }
@@ -369,7 +381,7 @@
             const nodeBox = new THREE.Box3().setFromObject(node);
             const centerY = nodeBox.isEmpty() ? 0 : (nodeBox.min.y + nodeBox.max.y) * 0.5;
             const texture = centerY >= midY ? DOOR_TEXTURES.top : DOOR_TEXTURES.bottom;
-            node.material = createOpaqueDoorMaterial(texture);
+            node.material = createDoorMaterial(texture);
             node.castShadow = true;
             node.receiveShadow = true;
           }
@@ -397,7 +409,7 @@
 
     const targetHeight = variant === 'piece'
       ? size
-      : (variant === 'carrier' ? size * 0.92 : size * 0.98);
+      : (variant === 'carrier' ? size * 0.92 : (variant === 'showcase' ? size : size * 0.98));
     const scale = targetHeight / Math.max(1e-6, DOOR_MODEL_STATE.unitHeight);
 
     const clone = DOOR_MODEL_STATE.template.clone(true);
@@ -412,6 +424,45 @@
       Math.max(0.02, height),
       Math.max(0.02, width),
     );
+  }
+
+  function createDoorFallbackMesh(size, variant = 'placed') {
+    const group = new THREE.Group();
+    const width = variant === 'piece' ? size * 0.58 : (variant === 'carrier' ? size * 0.62 : size * 0.68);
+    const height = variant === 'piece' ? size : (variant === 'carrier' ? size * 0.92 : size * 0.98);
+    const halfH = height * 0.5;
+    const matTop = createDoorMaterial(DOOR_TEXTURES.top);
+    const matBottom = createDoorMaterial(DOOR_TEXTURES.bottom);
+    const top = new THREE.Mesh(new THREE.PlaneGeometry(width, halfH), matTop);
+    const bottom = new THREE.Mesh(new THREE.PlaneGeometry(width, halfH), matBottom);
+    top.position.set(0, halfH * 0.5, 0);
+    bottom.position.set(0, -halfH * 0.5, 0);
+    group.add(top);
+    group.add(bottom);
+    group.traverse((node) => {
+      if (node.isMesh) {
+        node.castShadow = true;
+        node.receiveShadow = true;
+      }
+    });
+    return group;
+  }
+
+  function ensureDoorShowcaseNearMinecart(_scene, _minecart) {
+    return null;
+  }
+
+  function removeDoorShowcase(scene) {
+    if (!scene) {
+      return null;
+    }
+    let group = scene.getObjectByName('door-showcase-near-minecart');
+    if (!group) {
+      return null;
+    }
+    scene.remove(group);
+    disposeObject3D(group);
+    return null;
   }
 
   function createStairsMesh(size, material, variant = 'placed') {
@@ -448,15 +499,7 @@
       if (modelMesh) {
         return modelMesh;
       }
-      let mesh;
-      if (variant === 'piece') {
-        mesh = new THREE.Mesh(createDoorPanelGeometry(size * 0.58, size, size * 0.12), material);
-      } else if (variant === 'carrier') {
-        mesh = new THREE.Mesh(createDoorPanelGeometry(size * 0.62, size * 0.92, size * 0.14), material);
-      } else {
-        mesh = new THREE.Mesh(createDoorPanelGeometry(size * 0.68, size * 0.98, size * 0.16), material);
-      }
-      return mesh;
+      return createDoorFallbackMesh(size, variant);
     }
 
     if (shape === 'stairs') {
@@ -1929,8 +1972,9 @@
   }
 
   class WorldInventoryController {
-    constructor(scene, slotConfigs) {
+    constructor(scene, camera, slotConfigs) {
       this.scene = scene;
+      this.camera = camera;
       this.group = new THREE.Group();
       this.slots = new Map();
       this.interactiveMeshes = [];
@@ -1939,18 +1983,18 @@
 
       const layout = slotConfigs.filter((config) => !config.empty);
       const spacing = 2.55;
-      const startZ = -((layout.length - 1) * spacing) * 0.5;
-      const baseX = 9.8;
+      const startX = -((layout.length - 1) * spacing) * 0.5;
+      const baseZ = -9.8;
 
       for (let i = 0; i < layout.length; i += 1) {
         const config = layout[i];
-        const slotZ = startZ + i * spacing;
+        const slotX = startX + i * spacing;
 
         const clickPad = new THREE.Mesh(
           new THREE.BoxGeometry(1.8, 1, 1.8),
           new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
         );
-        clickPad.position.set(baseX, 0.5, slotZ);
+        clickPad.position.set(slotX, 0.5, baseZ);
         clickPad.userData.blockId = config.id;
         this.group.add(clickPad);
 
@@ -1958,7 +2002,7 @@
         this.slots.set(config.id, {
           id: config.id,
           clickPad,
-          anchor: new THREE.Vector3(baseX, 1.02, slotZ),
+          anchor: new THREE.Vector3(slotX, 1.02, baseZ),
           disabled: false,
           locked: false,
         });
@@ -2074,39 +2118,6 @@
       alphaTest: 0,
       side: isDoor ? THREE.DoubleSide : THREE.FrontSide,
     });
-  }
-
-  function ensureDoorShowcaseNearMinecart(scene, minecart) {
-    if (!scene || !minecart) {
-      return null;
-    }
-    const existing = scene.getObjectByName('door-showcase-near-minecart');
-    if (existing) {
-      return existing;
-    }
-    const mesh = createDoorModelMesh(1.25, 'placed');
-    if (!mesh) {
-      return null;
-    }
-
-    const cartPos = minecart.group.position.clone();
-    const forward = minecart.getForward(new THREE.Vector3());
-    forward.y = 0;
-    if (forward.lengthSq() < 1e-6) {
-      forward.set(0, 0, 1);
-    } else {
-      forward.normalize();
-    }
-    const side = new THREE.Vector3(forward.z, 0, -forward.x).normalize();
-
-    mesh.name = 'door-showcase-near-minecart';
-    mesh.position.copy(cartPos)
-      .add(side.multiplyScalar(1.7))
-      .add(forward.multiplyScalar(-0.3));
-    mesh.position.y = 1.0;
-    mesh.rotation.y = Math.atan2(forward.x, forward.z);
-    scene.add(mesh);
-    return mesh;
   }
 
   class BlockController {
@@ -3912,6 +3923,7 @@
   }
   minecart.snapToNearestPoint(new THREE.Vector3(9.8, trackController.pathY, 0));
   ensureDoorModelLoading();
+  removeDoorShowcase(scene);
   ensureDoorShowcaseNearMinecart(scene, minecart);
 
   let activeBlockId = null;
@@ -3954,7 +3966,7 @@
     return buildManager.getSlotTypeCounts();
   }
 
-  const worldInventory = new WorldInventoryController(scene, BLOCK_CONFIGS);
+  const worldInventory = new WorldInventoryController(scene, camera, BLOCK_CONFIGS);
   const blocks = new Map();
   const initialCountsByType = getLevelCountsByType();
 
@@ -3999,6 +4011,7 @@
   function bindDebugEditorUI() {
     const enabledInput = document.getElementById('editor-enabled');
     const shapeSelectHost = document.getElementById('editor-shape-select');
+    const propsSelectHost = document.getElementById('editor-props-select');
     const textureSelectHost = document.getElementById('editor-texture-select');
     const blockRotYSelect = document.getElementById('editor-rot-y');
     const levelSelect = document.getElementById('level-select');
@@ -4038,7 +4051,10 @@
     const cameraFilmOffsetInput = document.getElementById('cam-film-offset');
     const cameraResetBtn = document.getElementById('cam-reset');
     let shapeDropdownApi = null;
+    let propsDropdownApi = null;
     let textureDropdownApi = null;
+    const BLOCK_NONE_VALUE = '__none_block__';
+    const PROP_NONE_VALUE = '__none_prop__';
 
     function createPreviewSelect(root, options, initialValue, onChange) {
       if (!root) {
@@ -4540,13 +4556,32 @@
       saveSceneLayout();
     });
 
-    const shapeOptions = BLOCK_SHAPE_OPTIONS.map((option) => ({
+    const shapeOptions = [{
+      value: BLOCK_NONE_VALUE,
+      label: 'None',
+      shapeClass: 'shape-cube',
+      previewSrc: '',
+      blockType: '',
+    }].concat(BLOCK_SHAPE_OPTIONS.map((option) => ({
       value: option.id,
       label: option.label,
       shapeClass: `shape-${option.shape}`,
       previewSrc: SHAPE_PREVIEW_TEXTURE_SOURCE,
       blockType: option.type,
-    }));
+    })));
+    const propsOptions = [{
+      value: PROP_NONE_VALUE,
+      label: 'None',
+      shapeClass: 'shape-cube',
+      previewSrc: '',
+      blockType: '',
+    }].concat(PROP_EDITOR_OPTIONS.map((option) => ({
+      value: option.id,
+      label: option.label,
+      shapeClass: `shape-${option.shape || 'cube'}`,
+      previewSrc: resolveTexturePath(option.textureKey, option.fallbackTexture),
+      blockType: option.type,
+    })));
     const textureOptions = BLOCK_TEXTURE_KEYS.map((textureKey) => ({
       value: textureKey,
       label: textureKey,
@@ -4555,16 +4590,50 @@
       textureKey,
     }));
 
-    const initialShape = shapeOptions[0] ? shapeOptions[0].value : 'cube';
+    const initialShape = shapeOptions[1] ? shapeOptions[1].value : BLOCK_NONE_VALUE;
+    const initialProp = PROP_NONE_VALUE;
     const initialTexture = textureOptions[0] ? textureOptions[0].value : EDITOR_TEXTURE_MODE_AUTO;
 
     shapeDropdownApi = createPreviewSelect(shapeSelectHost, shapeOptions, initialShape, (shapeId) => {
+      if (shapeId === BLOCK_NONE_VALUE) {
+        return;
+      }
       const selected = shapeOptions.find((option) => option.value === shapeId);
       if (!selected) {
         return;
       }
+      if (propsDropdownApi) {
+        propsDropdownApi.setValue(PROP_NONE_VALUE);
+      }
       editor.setType(selected.blockType || DEFAULT_BLOCK_ID);
     });
+    if (propsOptions.length > 1) {
+      propsDropdownApi = createPreviewSelect(propsSelectHost, propsOptions, initialProp, (propId) => {
+        if (propId === PROP_NONE_VALUE) {
+          return;
+        }
+        const selected = propsOptions.find((option) => option.value === propId);
+        if (!selected) {
+          return;
+        }
+        if (shapeDropdownApi) {
+          shapeDropdownApi.setValue(BLOCK_NONE_VALUE);
+        }
+        if (textureDropdownApi) {
+          textureDropdownApi.setValue(EDITOR_TEXTURE_MODE_AUTO);
+        }
+        editor.setTextureKey(EDITOR_TEXTURE_MODE_AUTO);
+        editor.setType(selected.blockType || DEFAULT_BLOCK_ID);
+      });
+    } else {
+      propsDropdownApi = {
+        setValue() {},
+        getValue() { return ''; },
+      };
+      if (propsSelectHost) {
+        propsSelectHost.innerHTML = '';
+      }
+    }
     textureDropdownApi = createPreviewSelect(textureSelectHost, textureOptions, initialTexture, (textureKey) => {
       editor.setTextureKey(normalizeEditorTextureKey(textureKey));
     });
@@ -4574,8 +4643,15 @@
       levelSelect.value = activeLevelId;
     }
     syncLevelNameInput();
-    const selectedShapeOption = shapeOptions.find((option) => option.value === shapeDropdownApi.getValue()) || shapeOptions[0];
-    editor.setType(selectedShapeOption ? selectedShapeOption.blockType : DEFAULT_BLOCK_ID);
+    const selectedShapeOption = shapeOptions.find((option) => option.value === shapeDropdownApi.getValue()) || null;
+    const selectedPropOption = propsOptions.find((option) => option.value === propsDropdownApi.getValue()) || null;
+    if (selectedPropOption && selectedPropOption.value !== PROP_NONE_VALUE) {
+      editor.setType(selectedPropOption.blockType || DEFAULT_BLOCK_ID);
+    } else if (selectedShapeOption && selectedShapeOption.value !== BLOCK_NONE_VALUE) {
+      editor.setType(selectedShapeOption.blockType || DEFAULT_BLOCK_ID);
+    } else {
+      editor.setType(DEFAULT_BLOCK_ID);
+    }
     const selectedTextureOption = textureOptions.find((option) => option.value === textureDropdownApi.getValue()) || null;
     editor.setTextureKey(selectedTextureOption ? selectedTextureOption.textureKey : EDITOR_TEXTURE_MODE_AUTO);
     if (blockRotYSelect) {
@@ -4605,6 +4681,7 @@
   function step(dt) {
     updateFlyCamera(dt);
     minecart.update(dt);
+    removeDoorShowcase(scene);
     ensureDoorShowcaseNearMinecart(scene, minecart);
     for (const controller of blocks.values()) {
       controller.update(dt);
