@@ -4,6 +4,7 @@
 
   const TEMP_A = new THREE.Vector3();
   const TEMP_B = new THREE.Vector3();
+  const TEMP_C = new THREE.Vector3();
   const LOOK_TARGET = new THREE.Vector3();
   const TEXTURE_LOADER = new THREE.TextureLoader();
   const TEXTURE_DATA = window.PROTOTYPE_TEXTURE_DATA || {};
@@ -294,6 +295,39 @@
     loading: false,
     failed: false,
   };
+  const DOOR_DEFAULT_DIMENSIONS = {
+    offsetX: 0,
+    liftY: 0.49,
+    width: 1.02,
+    height: 1.994,
+    thickness: 0.122,
+  };
+  const DOOR_DIMENSIONS = { ...DOOR_DEFAULT_DIMENSIONS };
+
+  function getDoorVariantScale(variant) {
+    if (variant === 'piece') {
+      return { width: 0.58 / 0.68, height: 2.8 / 2.744 };
+    }
+    if (variant === 'carrier') {
+      return { width: 0.62 / 0.68, height: 2.576 / 2.744 };
+    }
+    if (variant === 'showcase') {
+      return { width: 1, height: 2.8 / 2.744 };
+    }
+    return { width: 1, height: 1 };
+  }
+
+  function getDoorDimensionsForVariant(size, variant = 'placed') {
+    const s = Number.isFinite(size) && size > 0 ? size : 1;
+    const k = getDoorVariantScale(variant);
+    return {
+      offsetX: s * DOOR_DIMENSIONS.offsetX,
+      liftY: s * DOOR_DIMENSIONS.liftY,
+      width: s * DOOR_DIMENSIONS.width * k.width,
+      height: s * DOOR_DIMENSIONS.height * k.height,
+      thickness: s * DOOR_DIMENSIONS.thickness * k.width,
+    };
+  }
 
   function createDoorMaterial(texture) {
     return new THREE.MeshStandardMaterial({
@@ -303,7 +337,7 @@
       metalness: 0.04,
       transparent: true,
       alphaTest: 0.35,
-      depthWrite: false,
+      depthWrite: true,
       side: THREE.DoubleSide,
     });
   }
@@ -407,14 +441,24 @@
       return null;
     }
 
-    const targetHeight = variant === 'piece'
-      ? size
-      : (variant === 'carrier' ? size * 0.92 : (variant === 'showcase' ? size : size * 0.98));
+    const dims = getDoorDimensionsForVariant(size, variant);
+    const targetHeight = dims.height;
     const scale = targetHeight / Math.max(1e-6, DOOR_MODEL_STATE.unitHeight);
+    const defaultDims = {
+      width: Math.max(1e-6, size * DOOR_DEFAULT_DIMENSIONS.width * getDoorVariantScale(variant).width),
+      thickness: Math.max(1e-6, size * DOOR_DEFAULT_DIMENSIONS.thickness * getDoorVariantScale(variant).width),
+    };
+    const widthScale = dims.width / defaultDims.width;
+    const thicknessScale = dims.thickness / defaultDims.thickness;
 
     const clone = DOOR_MODEL_STATE.template.clone(true);
-    clone.scale.multiplyScalar(scale);
+    clone.scale.set(scale * widthScale, scale, scale * thicknessScale);
     clone.rotation.y = Math.PI * 0.5;
+    clone.updateMatrixWorld(true);
+    const scaledBox = new THREE.Box3().setFromObject(clone);
+    if (!scaledBox.isEmpty()) {
+      clone.position.y += -0.5 - scaledBox.min.y;
+    }
     return clone;
   }
 
@@ -428,17 +472,20 @@
 
   function createDoorFallbackMesh(size, variant = 'placed') {
     const group = new THREE.Group();
-    const width = variant === 'piece' ? size * 0.58 : (variant === 'carrier' ? size * 0.62 : size * 0.68);
-    const height = variant === 'piece' ? size : (variant === 'carrier' ? size * 0.92 : size * 0.98);
+    const dims = getDoorDimensionsForVariant(size, variant);
+    const width = dims.width;
+    const height = dims.height;
+    const thickness = Math.max(0.02, dims.thickness);
     const halfH = height * 0.5;
     const matTop = createDoorMaterial(DOOR_TEXTURES.top);
     const matBottom = createDoorMaterial(DOOR_TEXTURES.bottom);
-    const top = new THREE.Mesh(new THREE.PlaneGeometry(width, halfH), matTop);
-    const bottom = new THREE.Mesh(new THREE.PlaneGeometry(width, halfH), matBottom);
+    const top = new THREE.Mesh(createDoorPanelGeometry(width, halfH, thickness), matTop);
+    const bottom = new THREE.Mesh(createDoorPanelGeometry(width, halfH, thickness), matBottom);
     top.position.set(0, halfH * 0.5, 0);
     bottom.position.set(0, -halfH * 0.5, 0);
     group.add(top);
     group.add(bottom);
+    group.position.y += halfH - 0.5;
     group.traverse((node) => {
       if (node.isMesh) {
         node.castShadow = true;
@@ -495,11 +542,19 @@
     const shape = blockDef && blockDef.shape ? blockDef.shape : 'cube';
 
     if (shape === 'door') {
+      const dims = getDoorDimensionsForVariant(size, variant);
       const modelMesh = createDoorModelMesh(size, variant);
       if (modelMesh) {
+        if (variant === 'placed') {
+          modelMesh.position.y += dims.liftY;
+        }
         return modelMesh;
       }
-      return createDoorFallbackMesh(size, variant);
+      const fallbackMesh = createDoorFallbackMesh(size, variant);
+      if (variant === 'placed') {
+        fallbackMesh.position.y += dims.liftY;
+      }
+      return fallbackMesh;
     }
 
     if (shape === 'stairs') {
@@ -536,6 +591,20 @@
       return new THREE.Mesh(CARRIER_GEOMETRY, material);
     }
     return new THREE.Mesh(new THREE.BoxGeometry(size, size, size), material);
+  }
+
+  function setPlacedBlockWorldPosition(mesh, type, size, worldPosition) {
+    if (!mesh || !worldPosition) {
+      return;
+    }
+    mesh.position.copy(worldPosition);
+    const blockDef = getBlockDefinition(type);
+    const shape = blockDef && blockDef.shape ? blockDef.shape : 'cube';
+    if (shape === 'door') {
+      const dims = getDoorDimensionsForVariant(size, 'placed');
+      mesh.position.x += dims.offsetX;
+      mesh.position.y += dims.liftY;
+    }
   }
 
   function attachCellUserData(root, cell) {
@@ -1624,6 +1693,25 @@
       this.center = new THREE.Vector3(0, this.baseY, 0);
     }
 
+    resolveInventoryKey(type, textureKey) {
+      const normalizedTextureKey = normalizeEditorTextureKey(textureKey);
+      const typeDef = getBlockDefinition(type);
+      const typeShape = typeDef && typeDef.shape ? typeDef.shape : 'cube';
+      if (normalizedTextureKey && normalizedTextureKey !== EDITOR_TEXTURE_MODE_AUTO) {
+        const matchingDef = BLOCK_LIBRARY.find((blockDef) => (
+          blockDef
+          && blockDef.id
+          && blockDef.inventory !== false
+          && (blockDef.shape || 'cube') === typeShape
+          && blockDef.textureKey === normalizedTextureKey
+        ));
+        if (matchingDef && matchingDef.id) {
+          return matchingDef.id;
+        }
+      }
+      return type;
+    }
+
     loadFromLevel(data) {
       for (const mesh of this.builtMeshes) {
         this.scene.remove(mesh);
@@ -1644,16 +1732,28 @@
         const y = Number(item.y);
         const z = Number(item.z);
         const type = item.type || DEFAULT_BLOCK_ID;
+        const textureKey = normalizeEditorTextureKey(
+          item.textureKey !== undefined ? item.textureKey : item.texture,
+        );
+        const rotYDeg = normalizeBlockRotationDeg(
+          item.rotYDeg !== undefined ? item.rotYDeg
+            : (item.rotY !== undefined ? item.rotY : (item.rot !== undefined ? item.rot : item.rotation)),
+        );
         if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
           continue;
         }
-        const key = `${x}:${y}:${z}`;
+        // Allow multiple block kinds in the same cell (for example base block + prop).
+        // Deduplicate only identical entries.
+        const key = `${x}:${y}:${z}:${type}:${textureKey}:${rotYDeg}`;
         if (unique.has(key)) {
           continue;
         }
         unique.add(key);
         this.slots.push({
           type,
+          textureKey,
+          rotYDeg,
+          inventoryKey: this.resolveInventoryKey(type, textureKey),
           position: new THREE.Vector3(
             x * this.cellSize,
             this.baseY + y * this.cellSize,
@@ -1703,25 +1803,22 @@
       }
     }
 
-    reserveNext(type, origin = null, forward = null) {
+    reserveNext(inventoryKey, origin = null, forward = null) {
       let selectedIndex = -1;
       let selectedDistanceSq = Infinity;
+      const maxNearbyDistanceSq = (this.cellSize * 2.35) * (this.cellSize * 2.35);
       const hasOrigin = origin && Number.isFinite(origin.x) && Number.isFinite(origin.z);
       const sideX = hasOrigin ? origin.x - this.center.x : 0;
       const sideZ = hasOrigin ? origin.z - this.center.z : 0;
       const sideLen = Math.hypot(sideX, sideZ);
       const nx = sideLen > 1e-6 ? sideX / sideLen : 0;
       const nz = sideLen > 1e-6 ? sideZ / sideLen : 0;
-      const hasForward = forward && Number.isFinite(forward.x) && Number.isFinite(forward.z);
-      const fwdLen = hasForward ? Math.hypot(forward.x, forward.z) : 0;
-      const fx = fwdLen > 1e-6 ? forward.x / fwdLen : 0;
-      const fz = fwdLen > 1e-6 ? forward.z / fwdLen : 0;
       for (let i = 0; i < this.slots.length; i += 1) {
         const slot = this.slots[i];
         if (slot.state !== 'free') {
           continue;
         }
-        if (slot.type !== type) {
+        if (slot.inventoryKey !== inventoryKey) {
           continue;
         }
         if (hasOrigin) {
@@ -1731,34 +1828,30 @@
           if (sideDot < 0) {
             continue;
           }
-          // Keep targets only in the near-side cone (about 60 deg around outward normal).
+          // Keep targets only on the same visible side and close to its outer band.
           const slotSideLen = Math.hypot(slotSideX, slotSideZ);
+          if (slotSideLen < this.cellSize * 1.2) {
+            continue;
+          }
           if (slotSideLen > 1e-6 && sideLen > 1e-6) {
             const sx = slotSideX / slotSideLen;
             const sz = slotSideZ / slotSideLen;
             const cosAngle = (sx * nx) + (sz * nz);
-            if (cosAngle < 0.5) {
+            if (cosAngle < 0.9) {
+              continue;
+            }
+            const sideProjection = (slotSideX * nx) + (slotSideZ * nz);
+            if (sideProjection < sideLen * 0.6) {
               continue;
             }
           }
         }
-        if (hasOrigin && fwdLen > 1e-6) {
-          const toSlotX = slot.position.x - origin.x;
-          const toSlotZ = slot.position.z - origin.z;
-          const toLen = Math.hypot(toSlotX, toSlotZ);
-          if (toLen > 1e-6) {
-            const tx = toSlotX / toLen;
-            const tz = toSlotZ / toLen;
-            const forwardDot = (tx * fx) + (tz * fz);
-            // Only targets in front of the moving cart.
-            if (forwardDot <= 0.1) {
-              continue;
-            }
-          }
+        const dx = hasOrigin ? (slot.position.x - origin.x) : (slot.position.x - this.center.x);
+        const dz = hasOrigin ? (slot.position.z - origin.z) : (slot.position.z - this.center.z);
+        const distanceSq = (dx * dx) + (dz * dz);
+        if (hasOrigin && distanceSq > maxNearbyDistanceSq) {
+          continue;
         }
-        const distanceSq = hasOrigin
-          ? slot.position.distanceToSquared(origin)
-          : slot.position.distanceToSquared(this.center);
         if (distanceSq < selectedDistanceSq) {
           selectedDistanceSq = distanceSq;
           selectedIndex = i;
@@ -1771,8 +1864,8 @@
       return null;
     }
 
-    hasFreeSlotForType(type) {
-      return this.slots.some((slot) => slot.state === 'free' && slot.type === type);
+    hasFreeSlotForType(inventoryKey) {
+      return this.slots.some((slot) => slot.state === 'free' && slot.inventoryKey === inventoryKey);
     }
 
     commit(index) {
@@ -1786,10 +1879,11 @@
       const mesh = createBlockMesh(
         slot.type,
         this.cellSize,
-        this.createMaterial(slot.type, 0xffffff),
+        this.createMaterial(slot.type, 0xffffff, { textureKey: slot.textureKey }),
         'placed',
       );
-      mesh.position.copy(slot.position);
+      setPlacedBlockWorldPosition(mesh, slot.type, this.cellSize, slot.position);
+      mesh.rotation.y = (slot.rotYDeg || 0) * (Math.PI / 180);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.scene.add(mesh);
@@ -1809,7 +1903,7 @@
     getSlotTypeCounts() {
       const counts = {};
       for (const slot of this.slots) {
-        counts[slot.type] = (counts[slot.type] || 0) + 1;
+        counts[slot.inventoryKey] = (counts[slot.inventoryKey] || 0) + 1;
       }
       return counts;
     }
@@ -2011,9 +2105,23 @@
       this.scene.add(this.group);
     }
 
+    getGroupPosition(target = new THREE.Vector3()) {
+      return target.copy(this.group.position);
+    }
+
+    setGroupPosition(x, z) {
+      if (!Number.isFinite(x) || !Number.isFinite(z)) {
+        return;
+      }
+      this.group.position.set(x, 0, z);
+    }
+
     getSlotAnchor(id) {
       const slot = this.slots.get(id);
-      return slot ? slot.anchor.clone() : null;
+      if (!slot) {
+        return null;
+      }
+      return this.group.localToWorld(slot.anchor.clone());
     }
 
     registerCarrierMesh(id, mesh) {
@@ -2022,6 +2130,21 @@
       }
       mesh.userData.blockId = id;
       this.interactiveMeshes.push(mesh);
+    }
+
+    replaceCarrierMesh(id, oldMesh, newMesh) {
+      if (!newMesh) {
+        return;
+      }
+      newMesh.userData.blockId = id;
+      if (oldMesh) {
+        const idx = this.interactiveMeshes.indexOf(oldMesh);
+        if (idx >= 0) {
+          this.interactiveMeshes[idx] = newMesh;
+          return;
+        }
+      }
+      this.interactiveMeshes.push(newMesh);
     }
 
     setCount(_id, _value) {
@@ -2049,13 +2172,22 @@
       slot.clickPad.userData.blocked = blocked;
     }
 
-    pickBlockId(clientX, clientY, camera, canvas) {
+    pickInventoryHit(clientX, clientY, camera, canvas) {
       const rect = canvas.getBoundingClientRect();
       this.pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
       this.pointerNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
 
       this.pointerRaycaster.setFromCamera(this.pointerNdc, camera);
       const hits = this.pointerRaycaster.intersectObjects(this.interactiveMeshes, false);
+      return hits.length > 0 ? hits[0] : null;
+    }
+
+    pickBlockId(clientX, clientY, camera, canvas) {
+      const firstHit = this.pickInventoryHit(clientX, clientY, camera, canvas);
+      if (!firstHit) {
+        return null;
+      }
+      const hits = [firstHit];
       for (const hit of hits) {
         let obj = hit.object;
         while (obj) {
@@ -2139,6 +2271,8 @@
       this.spawnTimer = 0;
       this.idleTime = Math.random() * Math.PI * 2;
       this.idleSeed = Math.random() * Math.PI * 2;
+      this.idleRotationY = Math.random() * Math.PI * 2;
+      this.idleYawOffsetRad = 0;
 
       this.launchDuration = 0.62;
       this.dispatchDuration = 8.1;
@@ -2192,6 +2326,14 @@
       this.mesh.position.y += 0.52;
     }
 
+    setIdleYawOffsetDeg(deg) {
+      const normalized = Number.isFinite(Number(deg)) ? Number(deg) : 0;
+      this.idleYawOffsetRad = (normalized * Math.PI) / 180;
+      if (this.state === 'idle') {
+        this.mesh.rotation.y = this.idleRotationY + this.idleYawOffsetRad;
+      }
+    }
+
     canStartCycle() {
       return this.state === 'idle' && this.count > 0 && !this.minecart.isMoving();
     }
@@ -2208,7 +2350,7 @@
         this.state = 'idle';
         this.mesh.position.copy(this.uiAnchor);
         this.mesh.position.y += 0.52;
-        this.mesh.rotation.set(0, 0, 0);
+        this.mesh.rotation.set(0, this.idleRotationY + this.idleYawOffsetRad, 0);
       }
       this.updateCountVisual();
     }
@@ -2269,7 +2411,7 @@
 
     updateDispatching(dt) {
       this.phaseTime += dt;
-      if (this.count <= 0 || !this.buildManager.hasFreeSlotForType(this.type)) {
+      if (this.count <= 0 || !this.buildManager.hasFreeSlotForType(this.id)) {
         this.phaseTime = this.dispatchDuration;
       }
 
@@ -2326,10 +2468,11 @@
 
     updateIdle(dt) {
       this.idleTime += dt;
+      this.idleRotationY += dt * 0.82;
       const bob = 0.5 + Math.sin(this.idleTime * 2.1 + this.idleSeed) * 0.1;
       this.mesh.position.copy(this.uiAnchor);
       this.mesh.position.y += bob;
-      this.mesh.rotation.y += dt * 0.82;
+      this.mesh.rotation.y = this.idleRotationY + this.idleYawOffsetRad;
       this.mesh.rotation.x = Math.sin(this.idleTime * 1.25 + this.idleSeed) * 0.05;
     }
 
@@ -2338,11 +2481,11 @@
         return 'depleted';
       }
 
-      if (!this.buildManager.hasFreeSlotForType(this.type)) {
+      if (!this.buildManager.hasFreeSlotForType(this.id)) {
         return 'finished';
       }
 
-      const reserved = this.buildManager.reserveNext(this.type, origin || this.mesh.position, forward || null);
+      const reserved = this.buildManager.reserveNext(this.id, origin || this.mesh.position, forward || null);
       if (!reserved) {
         return 'waiting-side';
       }
@@ -2873,7 +3016,12 @@
         this.createMaterial(this.selectedType, 0xffffff, { textureKey: this.selectedTextureKey }),
         'placed',
       );
-      mesh.position.copy(this.cellToPosition(x, targetY, z));
+      setPlacedBlockWorldPosition(
+        mesh,
+        this.selectedType,
+        this.boxSize,
+        this.cellToPosition(x, targetY, z),
+      );
       mesh.rotation.y = (this.selectedRotationDeg * Math.PI) / 180;
       attachCellUserData(mesh, { x, y: targetY, z });
       mesh.castShadow = true;
@@ -2913,7 +3061,7 @@
         this.createMaterial(type, 0xffffff, { textureKey }),
         'placed',
       );
-      mesh.position.copy(this.cellToPosition(x, y, z));
+      setPlacedBlockWorldPosition(mesh, type, this.boxSize, this.cellToPosition(x, y, z));
       mesh.rotation.y = (rotYDeg * Math.PI) / 180;
       attachCellUserData(mesh, { x, y, z });
       mesh.castShadow = true;
@@ -2958,6 +3106,36 @@
       }
       this.suspendChangeEvents = Math.max(0, this.suspendChangeEvents - 1);
       this.notifyChange();
+    }
+
+    refreshDoorMeshes() {
+      for (const entry of this.cells.values()) {
+        if (!entry || entry.type !== 'door' || !entry.mesh) {
+          continue;
+        }
+        const oldMesh = entry.mesh;
+        const nextMesh = createBlockMesh(
+          entry.type,
+          this.boxSize,
+          this.createMaterial(entry.type, 0xffffff, { textureKey: entry.textureKey }),
+          'placed',
+        );
+        setPlacedBlockWorldPosition(
+          nextMesh,
+          entry.type,
+          this.boxSize,
+          this.cellToPosition(entry.x, entry.y, entry.z),
+        );
+        nextMesh.rotation.copy(oldMesh.rotation);
+        nextMesh.visible = oldMesh.visible;
+        attachCellUserData(nextMesh, { x: entry.x, y: entry.y, z: entry.z });
+        nextMesh.castShadow = true;
+        nextMesh.receiveShadow = true;
+        this.group.add(nextMesh);
+        this.group.remove(oldMesh);
+        disposeObject3D(oldMesh);
+        entry.mesh = nextMesh;
+      }
     }
   }
 
@@ -3086,11 +3264,19 @@
     return normalizeRails(buildRailLoopFromBounds(preset));
   }
   const debugEditor = document.getElementById('debug-editor');
+  const inventoryMoveEnabledInput = document.getElementById('inventory-move-enabled');
   let uiHidden = false;
   let flyCamEnabled = false;
   let flyCamRestoreState = null;
   let syncCameraInputsFromState = null;
   let flyLookActive = false;
+  let inventoryMoveEnabled = false;
+  let inventorySpinAngleDeg = 0;
+  let draggingInventory = false;
+  const inventoryDragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const inventoryDragPoint = new THREE.Vector3();
+  const inventoryDragOffset = new THREE.Vector3();
+  const inventoryDragRaycaster = new THREE.Raycaster();
   let flyYawDeg = 0;
   let flyPitchDeg = 0;
   const flyMoveState = {
@@ -3127,6 +3313,15 @@
   function toFiniteNumber(value, fallback) {
     const next = Number(value);
     return Number.isFinite(next) ? next : fallback;
+  }
+
+  function normalizeSpinAngleDeg(value) {
+    const raw = Number(value);
+    if (!Number.isFinite(raw)) {
+      return 0;
+    }
+    const wrapped = ((raw % 360) + 360) % 360;
+    return Math.round(wrapped);
   }
 
   function exportCameraDebugState() {
@@ -3364,8 +3559,9 @@
   function getCurrentSceneSnapshot() {
     const currentRails = normalizeRails(railEditor.exportData());
     const safeRails = currentRails.length > 0 ? currentRails : getDefaultUserRails();
+    const inventoryPos = worldInventory.getGroupPosition(TEMP_A);
     return {
-      version: 4,
+      version: 5,
       levelId: activeLevelId,
       blocks: getEditorBlocksSnapshot(),
       build: getBuildSettingsSnapshot(),
@@ -3373,6 +3569,11 @@
       rails: safeRails,
       minecart: {
         speed: minecart.getSpeed(),
+      },
+      inventory: {
+        x: toFiniteNumber(inventoryPos.x, 0),
+        z: toFiniteNumber(inventoryPos.z, 0),
+        spinAngleDeg: normalizeSpinAngleDeg(inventorySpinAngleDeg),
       },
       camera: exportCameraDebugState(),
     };
@@ -3423,11 +3624,6 @@
       const ix = Math.round(x);
       const iy = Math.max(0, Math.min(8, Math.round(y)));
       const iz = Math.round(z);
-      const key = `${ix}:${iy}:${iz}`;
-      if (used.has(key)) {
-        continue;
-      }
-      used.add(key);
       const textureKey = normalizeEditorTextureKey(
         block.textureKey !== undefined ? block.textureKey : block.texture,
       );
@@ -3435,6 +3631,11 @@
         block.rotYDeg !== undefined ? block.rotYDeg
           : (block.rotY !== undefined ? block.rotY : (block.rot !== undefined ? block.rot : block.rotation)),
       );
+      const key = `${ix}:${iy}:${iz}:${type}:${textureKey}:${rotYDeg}`;
+      if (used.has(key)) {
+        continue;
+      }
+      used.add(key);
       const normalizedBlock = {
         type,
         x: ix,
@@ -3745,6 +3946,9 @@
     const snapshotRailLoopSize = normalizeRailLoopSize(raw.railLoopSize);
     const rails = normalizeRails(raw.rails);
     const speed = Number(raw.minecart && raw.minecart.speed);
+    const inventoryX = Number(raw.inventory && raw.inventory.x);
+    const inventoryZ = Number(raw.inventory && raw.inventory.z);
+    const inventorySpinAngleDeg = normalizeSpinAngleDeg(raw.inventory && raw.inventory.spinAngleDeg);
     const cameraSettings = normalizeCameraSettings(raw.camera);
     const effectiveBlocks = hasBlocksField ? blocks : normalizeBlocks(levelData.blocks);
     const effectiveBuildTargetBlocks = hasBuildTargetField
@@ -3757,6 +3961,11 @@
       railLoopSize: snapshotRailLoopSize,
       rails: rails.length > 0 ? rails : (normalizeRails(levelData.rails).length > 0 ? normalizeRails(levelData.rails) : getDefaultUserRails(snapshotRailLoopSize)),
       minecartSpeed: Number.isFinite(speed) && speed > 0 ? speed : levelData.minecartSpeed,
+      inventoryPosition: {
+        x: Number.isFinite(inventoryX) ? inventoryX : 0,
+        z: Number.isFinite(inventoryZ) ? inventoryZ : 0,
+      },
+      inventorySpinAngleDeg,
       camera: cameraSettings || normalizeCameraSettings(levelData.camera),
     };
   }
@@ -3970,6 +4179,31 @@
   const blocks = new Map();
   const initialCountsByType = getLevelCountsByType();
 
+  function syncInventoryAnchors() {
+    if (activeBlockId !== null) {
+      return;
+    }
+    for (const [id, controller] of blocks.entries()) {
+      if (!controller) {
+        continue;
+      }
+      const anchor = worldInventory.getSlotAnchor(id);
+      if (!anchor) {
+        continue;
+      }
+      controller.setUiAnchor(anchor);
+    }
+  }
+
+  function applyInventorySpinAngle() {
+    for (const controller of blocks.values()) {
+      if (!controller) {
+        continue;
+      }
+      controller.setIdleYawOffsetDeg(inventorySpinAngleDeg);
+    }
+  }
+
   for (const config of BLOCK_CONFIGS) {
     const controller = new BlockController({
       scene,
@@ -3990,11 +4224,13 @@
     worldInventory.registerCarrierMesh(config.id, controller.mesh);
     blocks.set(config.id, controller);
   }
+  syncInventoryAnchors();
+  applyInventorySpinAngle();
 
   function syncBlockCountsFromLevel() {
     const countsByType = getLevelCountsByType();
     for (const controller of blocks.values()) {
-      controller.setCount(countsByType[controller.type] || 0);
+      controller.setCount(countsByType[controller.id] || 0);
     }
   }
 
@@ -4008,12 +4244,61 @@
     }
   }
 
+  function refreshDoorCarrierMeshes() {
+    for (const [id, controller] of blocks.entries()) {
+      if (!controller || controller.type !== 'door') {
+        continue;
+      }
+      const oldMesh = controller.mesh;
+      const nextMesh = createBlockMesh(
+        controller.type,
+        1,
+        createBlockMaterial(controller.type, controller.color),
+        'carrier',
+      );
+      nextMesh.castShadow = true;
+      nextMesh.receiveShadow = true;
+      nextMesh.position.copy(oldMesh.position);
+      nextMesh.rotation.copy(oldMesh.rotation);
+      nextMesh.visible = oldMesh.visible;
+      nextMesh.add(controller.countSprite);
+      controller.mesh = nextMesh;
+      scene.add(nextMesh);
+      scene.remove(oldMesh);
+      worldInventory.replaceCarrierMesh(id, oldMesh, nextMesh);
+      disposeObject3D(oldMesh);
+
+      for (const projectile of controller.projectiles) {
+        if (!projectile || !projectile.mesh) {
+          continue;
+        }
+        const oldProjectileMesh = projectile.mesh;
+        const nextProjectileMesh = createBlockMesh(
+          controller.type,
+          0.32,
+          createBlockMaterial(controller.type, controller.color),
+          'piece',
+        );
+        nextProjectileMesh.castShadow = true;
+        nextProjectileMesh.receiveShadow = true;
+        nextProjectileMesh.position.copy(oldProjectileMesh.position);
+        nextProjectileMesh.rotation.copy(oldProjectileMesh.rotation);
+        nextProjectileMesh.visible = oldProjectileMesh.visible;
+        projectile.mesh = nextProjectileMesh;
+        scene.add(nextProjectileMesh);
+        scene.remove(oldProjectileMesh);
+        disposeObject3D(oldProjectileMesh);
+      }
+    }
+  }
+
   function bindDebugEditorUI() {
     const enabledInput = document.getElementById('editor-enabled');
     const shapeSelectHost = document.getElementById('editor-shape-select');
     const propsSelectHost = document.getElementById('editor-props-select');
     const textureSelectHost = document.getElementById('editor-texture-select');
     const blockRotYSelect = document.getElementById('editor-rot-y');
+    const inventorySpinAngleInput = document.getElementById('inventory-spin-angle');
     const levelSelect = document.getElementById('level-select');
     const levelNameInput = document.getElementById('level-name');
     const levelLoadBtn = document.getElementById('level-load');
@@ -4031,6 +4316,11 @@
     const sceneExportFileBtn = document.getElementById('scene-export-file');
     const sceneImportFileBtn = document.getElementById('scene-import-file');
     const sceneFileInput = document.getElementById('scene-file-input');
+    const doorOffsetXInput = document.getElementById('door-offset-x');
+    const doorLiftYInput = document.getElementById('door-lift-y');
+    const doorWidthInput = document.getElementById('door-width');
+    const doorHeightInput = document.getElementById('door-height');
+    const doorThicknessInput = document.getElementById('door-thickness');
     const cameraFlyEnabledInput = document.getElementById('cam-fly-enabled');
     const cameraLookAtEnabledInput = document.getElementById('cam-lookat-enabled');
     const cameraPosXInput = document.getElementById('cam-pos-x');
@@ -4235,6 +4525,36 @@
       saveSceneLayout();
     }
 
+    function setDoorInputsFromState() {
+      if (doorOffsetXInput) {
+        doorOffsetXInput.value = DOOR_DIMENSIONS.offsetX.toFixed(3);
+      }
+      if (doorLiftYInput) {
+        doorLiftYInput.value = DOOR_DIMENSIONS.liftY.toFixed(3);
+      }
+      if (doorWidthInput) {
+        doorWidthInput.value = DOOR_DIMENSIONS.width.toFixed(3);
+      }
+      if (doorHeightInput) {
+        doorHeightInput.value = DOOR_DIMENSIONS.height.toFixed(3);
+      }
+      if (doorThicknessInput) {
+        doorThicknessInput.value = DOOR_DIMENSIONS.thickness.toFixed(3);
+      }
+    }
+
+    function commitDoorFromInputs() {
+      DOOR_DIMENSIONS.offsetX = toFiniteNumber(doorOffsetXInput && doorOffsetXInput.value, DOOR_DIMENSIONS.offsetX);
+      DOOR_DIMENSIONS.liftY = toFiniteNumber(doorLiftYInput && doorLiftYInput.value, DOOR_DIMENSIONS.liftY);
+      DOOR_DIMENSIONS.width = Math.max(0.02, toFiniteNumber(doorWidthInput && doorWidthInput.value, DOOR_DIMENSIONS.width));
+      DOOR_DIMENSIONS.height = Math.max(0.1, toFiniteNumber(doorHeightInput && doorHeightInput.value, DOOR_DIMENSIONS.height));
+      DOOR_DIMENSIONS.thickness = Math.max(0.02, toFiniteNumber(doorThicknessInput && doorThicknessInput.value, DOOR_DIMENSIONS.thickness));
+      setDoorInputsFromState();
+      editor.refreshDoorMeshes();
+      refreshDoorCarrierMeshes();
+      saveSceneLayout();
+    }
+
     function loadSelectedLevel(levelId) {
       const levelData = cloneLevelData(LEVELS_BY_ID.get(levelId) || INITIAL_LEVEL_DATA);
       activeLevelId = levelData.id;
@@ -4290,6 +4610,13 @@
       trackController.setRailLayout(railEditor.exportData());
       minecart.setSpeed(normalized.minecartSpeed);
       minecartSpeedInput.value = String(minecart.getSpeed());
+      worldInventory.setGroupPosition(normalized.inventoryPosition.x, normalized.inventoryPosition.z);
+      inventorySpinAngleDeg = normalizeSpinAngleDeg(normalized.inventorySpinAngleDeg);
+      applyInventorySpinAngle();
+      syncInventoryAnchors();
+      if (inventorySpinAngleInput) {
+        inventorySpinAngleInput.value = String(inventorySpinAngleDeg);
+      }
       if (normalized.camera) {
         Object.assign(cameraDebugState, normalized.camera);
         applyCameraDebugState();
@@ -4356,6 +4683,30 @@
     enabledInput.addEventListener('change', () => {
       editor.setEnabled(enabledInput.checked);
     });
+    if (inventoryMoveEnabledInput) {
+      inventoryMoveEnabledInput.checked = inventoryMoveEnabled;
+      inventoryMoveEnabledInput.addEventListener('change', () => {
+        inventoryMoveEnabled = Boolean(inventoryMoveEnabledInput.checked);
+        if (!inventoryMoveEnabled) {
+          draggingInventory = false;
+        }
+      });
+    }
+    if (inventorySpinAngleInput) {
+      inventorySpinAngleInput.value = String(inventorySpinAngleDeg);
+      inventorySpinAngleInput.addEventListener('input', () => {
+        inventorySpinAngleDeg = normalizeSpinAngleDeg(inventorySpinAngleInput.value);
+        inventorySpinAngleInput.value = String(inventorySpinAngleDeg);
+        applyInventorySpinAngle();
+        saveSceneLayout();
+      });
+      inventorySpinAngleInput.addEventListener('change', () => {
+        inventorySpinAngleDeg = normalizeSpinAngleDeg(inventorySpinAngleInput.value);
+        inventorySpinAngleInput.value = String(inventorySpinAngleDeg);
+        applyInventorySpinAngle();
+        saveSceneLayout();
+      });
+    }
 
     if (levelLoadBtn && levelSelect) {
       levelLoadBtn.addEventListener('click', () => {
@@ -4523,6 +4874,21 @@
       });
     }
 
+    setDoorInputsFromState();
+    for (const input of [
+      doorOffsetXInput,
+      doorLiftYInput,
+      doorWidthInput,
+      doorHeightInput,
+      doorThicknessInput,
+    ]) {
+      if (!input) {
+        continue;
+      }
+      input.addEventListener('input', commitDoorFromInputs);
+      input.addEventListener('change', commitDoorFromInputs);
+    }
+
     cameraFlyEnabledInput.addEventListener('change', () => {
       setFlyCamEnabled(cameraFlyEnabledInput.checked);
       setCameraInputsFromState();
@@ -4670,6 +5036,9 @@
   }
 
   function tryInventoryClick(event) {
+    if (inventoryMoveEnabled) {
+      return false;
+    }
     const pickedId = worldInventory.pickBlockId(event.clientX, event.clientY, camera, canvas);
     if (!pickedId) {
       return false;
@@ -4688,6 +5057,14 @@
     }
 
     renderer.render(scene, camera);
+  }
+
+  function getPointerPlanePoint(event, plane, target) {
+    const rect = canvas.getBoundingClientRect();
+    const ndcX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    inventoryDragRaycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
+    return inventoryDragRaycaster.ray.intersectPlane(plane, target);
   }
 
   const clock = new THREE.Clock();
@@ -4732,6 +5109,17 @@
   });
 
   canvas.addEventListener('pointermove', (event) => {
+    if (draggingInventory) {
+      const hit = getPointerPlanePoint(event, inventoryDragPlane, inventoryDragPoint);
+      if (hit) {
+        worldInventory.setGroupPosition(
+          inventoryDragPoint.x + inventoryDragOffset.x,
+          inventoryDragPoint.z + inventoryDragOffset.z,
+        );
+        syncInventoryAnchors();
+      }
+      return;
+    }
     if (flyCamEnabled && flyLookActive) {
       const sensitivity = 0.18;
       flyYawDeg -= event.movementX * sensitivity;
@@ -4778,6 +5166,24 @@
       return;
     }
 
+    if (inventoryMoveEnabled) {
+      if (activeBlockId !== null) {
+        window.alert('Finish active block cycle first, then move block zone.');
+        return;
+      }
+      const inventoryHit = worldInventory.pickInventoryHit(event.clientX, event.clientY, camera, canvas);
+      if (inventoryHit) {
+        const hit = getPointerPlanePoint(event, inventoryDragPlane, inventoryDragPoint);
+        if (hit) {
+          const current = worldInventory.getGroupPosition(TEMP_C);
+          inventoryDragOffset.set(current.x - inventoryDragPoint.x, 0, current.z - inventoryDragPoint.z);
+          draggingInventory = true;
+          canvas.setPointerCapture(event.pointerId);
+        }
+        return;
+      }
+    }
+
     if (!editor.isEnabled() && tryInventoryClick(event)) {
       return;
     }
@@ -4792,6 +5198,14 @@
     }
   });
   canvas.addEventListener('pointerup', (event) => {
+    if (event.button === 0 && draggingInventory) {
+      draggingInventory = false;
+      if (canvas.hasPointerCapture(event.pointerId)) {
+        canvas.releasePointerCapture(event.pointerId);
+      }
+      saveSceneLayout();
+      return;
+    }
     if (event.button === 2) {
       flyLookActive = false;
       if (canvas.hasPointerCapture(event.pointerId)) {

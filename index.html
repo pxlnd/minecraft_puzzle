@@ -34,6 +34,14 @@
 
       <details class="debug-group" open>
         <summary>Blocks</summary>
+        <label class="debug-row">
+          <span>Move Block Zone</span>
+          <input id="inventory-move-enabled" type="checkbox" />
+        </label>
+        <label class="debug-row">
+          <span>Spin Angle</span>
+          <input id="inventory-spin-angle" type="number" step="1" value="0" />
+        </label>
         <div class="debug-preview-field">
           <span class="debug-preview-label">Shape</span>
           <div id="editor-shape-select" class="debug-preview-select"></div>
@@ -112,6 +120,30 @@
           <button id="scene-export-file" type="button">Save Scene File</button>
           <button id="scene-import-file" type="button">Open Scene File</button>
         </div>
+      </details>
+
+      <details class="debug-group">
+        <summary>Door</summary>
+        <label class="debug-row">
+          <span>World X Offset</span>
+          <input id="door-offset-x" type="number" step="0.01" value="0.0" />
+        </label>
+        <label class="debug-row">
+          <span>World Y Offset</span>
+          <input id="door-lift-y" type="number" step="0.01" value="0.49" />
+        </label>
+        <label class="debug-row">
+          <span>Width</span>
+          <input id="door-width" type="number" step="0.01" value="1.02" />
+        </label>
+        <label class="debug-row">
+          <span>Height</span>
+          <input id="door-height" type="number" step="0.01" value="1.994" />
+        </label>
+        <label class="debug-row">
+          <span>Thickness</span>
+          <input id="door-thickness" type="number" step="0.01" value="0.122" />
+        </label>
       </details>
 
       <details class="debug-group">
@@ -204,6 +236,6 @@
     <script src="./js/game/data/levels/registry.js"></script>
     <script src="./js/game/data/levels/level-01-starter.js"></script>
     <script src="./js/game/data/levels/level-02-forms.js"></script>
-    <script src="./js/game/app.js?v=20260320-03"></script>
+    <script src="./js/game/app.js?v=20260323-08"></script>
   </body>
 </html>
