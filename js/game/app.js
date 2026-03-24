@@ -1914,18 +1914,8 @@
       void forward;
       const hasOrigin = origin && Number.isFinite(origin.x) && Number.isFinite(origin.z);
       const EPS_Y = this.cellSize * 0.01;
-
-      let globalMinFreeY = Infinity;
-      for (let i = 0; i < this.slots.length; i += 1) {
-        const slot = this.slots[i];
-        if (slot.state !== 'free') {
-          continue;
-        }
-        if (slot.position.y < globalMinFreeY) {
-          globalMinFreeY = slot.position.y;
-        }
-      }
-      if (!Number.isFinite(globalMinFreeY)) {
+      const currentPendingY = this.getCurrentLayerPendingY();
+      if (!Number.isFinite(currentPendingY)) {
         return null;
       }
 
@@ -1968,7 +1958,7 @@
           if (slot.inventoryKey !== inventoryKey) {
             continue;
           }
-          if (slot.position.y > globalMinFreeY + EPS_Y) {
+          if (slot.position.y > currentPendingY + EPS_Y) {
             continue;
           }
 
@@ -2086,6 +2076,35 @@
       return null;
     }
 
+    getCurrentLayerPendingY() {
+      let globalMinPendingY = Infinity;
+      for (const slot of this.slots) {
+        if (slot.state === 'built') {
+          continue;
+        }
+        if (slot.position.y < globalMinPendingY) {
+          globalMinPendingY = slot.position.y;
+        }
+      }
+      return Number.isFinite(globalMinPendingY) ? globalMinPendingY : null;
+    }
+
+    getCurrentLayerPendingSlotsOrdered() {
+      const minY = this.getCurrentLayerPendingY();
+      if (!Number.isFinite(minY)) {
+        return [];
+      }
+      const EPS_Y = this.cellSize * 0.01;
+      return this.slots
+        .filter((slot) => slot.state !== 'built' && slot.position.y <= minY + EPS_Y)
+        .slice()
+        .sort((a, b) => {
+          const aOrder = Number.isFinite(a.buildOrder) ? a.buildOrder : Number.MAX_SAFE_INTEGER;
+          const bOrder = Number.isFinite(b.buildOrder) ? b.buildOrder : Number.MAX_SAFE_INTEGER;
+          return aOrder - bOrder;
+        });
+    }
+
     getCurrentLayerFreeY() {
       let globalMinFreeY = Infinity;
       for (const slot of this.slots) {
@@ -2100,19 +2119,7 @@
     }
 
     getCurrentLayerFreeSlotsOrdered() {
-      const minY = this.getCurrentLayerFreeY();
-      if (!Number.isFinite(minY)) {
-        return [];
-      }
-      const EPS_Y = this.cellSize * 0.01;
-      return this.slots
-        .filter((slot) => slot.state === 'free' && slot.position.y <= minY + EPS_Y)
-        .slice()
-        .sort((a, b) => {
-          const aOrder = Number.isFinite(a.buildOrder) ? a.buildOrder : Number.MAX_SAFE_INTEGER;
-          const bOrder = Number.isFinite(b.buildOrder) ? b.buildOrder : Number.MAX_SAFE_INTEGER;
-          return aOrder - bOrder;
-        });
+      return this.getCurrentLayerPendingSlotsOrdered().filter((slot) => slot.state === 'free');
     }
 
     getNextRequiredInventoryKey() {
@@ -2217,7 +2224,7 @@
     getCurrentLayerQueue() {
       const queue = [];
       const byInventoryKey = new Map();
-      for (const slot of this.getCurrentLayerFreeSlotsOrdered()) {
+      for (const slot of this.getCurrentLayerPendingSlotsOrdered()) {
         if (!slot || !slot.inventoryKey) {
           continue;
         }
@@ -2243,6 +2250,19 @@
         }
       }
       return queue;
+    }
+
+    getCurrentLayerPendingInventoryIds() {
+      const ids = [];
+      const seen = new Set();
+      for (const slot of this.getCurrentLayerPendingSlotsOrdered()) {
+        if (!slot || !slot.inventoryKey || seen.has(slot.inventoryKey)) {
+          continue;
+        }
+        seen.add(slot.inventoryKey);
+        ids.push(slot.inventoryKey);
+      }
+      return ids;
     }
 
     setVisible(visible) {
@@ -4472,8 +4492,8 @@
   const debugEditor = document.getElementById('debug-editor');
   const inventoryMoveEnabledInput = document.getElementById('inventory-move-enabled');
   const DEFAULT_INVENTORY_ZONE = {
-    x: 21.24,
-    z: 0.01,
+    x: 19.17,
+    z: -0.03,
     angleDeg: 90,
   };
   let uiHidden = false;
@@ -5502,7 +5522,6 @@
       const isValid = Boolean(
         id
           && !seenFront.has(id)
-          && activeSet.has(id)
           && controller
           && controller.getCount() > 0,
       );
@@ -5518,11 +5537,11 @@
       if (!id) {
         continue;
       }
+      const controller = blocks.get(id) || null;
       const isValid = (
         !seenFront.has(id)
-        && activeSet.has(id)
-        && blocks.has(id)
-        && blocks.get(id).getCount() > 0
+        && controller
+        && controller.getCount() > 0
       );
       if (!isValid) {
         inventoryBackSlots[i] = null;
@@ -5536,10 +5555,38 @@
       if (seenFront.has(id) || findBackSlotIndexById(id) >= 0) {
         continue;
       }
-      allocateBackSlotForId(id);
+      const freeFrontSlot = getFirstFreeFrontSlotIndex();
+      if (freeFrontSlot >= 0) {
+        inventoryFrontSlots[freeFrontSlot] = id;
+        seenFront.add(id);
+      } else {
+        allocateBackSlotForId(id);
+      }
     }
 
-    if (pendingBackToFrontId && !activeSet.has(pendingBackToFrontId)) {
+    // Keep nearest cells populated first: if front has gaps and matching blocks
+    // are still in back slots, promote them to front without reflowing others.
+    let freeFrontSlot = getFirstFreeFrontSlotIndex();
+    if (freeFrontSlot >= 0) {
+      for (let i = 0; i < inventoryBackSlots.length; i += 1) {
+        if (freeFrontSlot < 0) {
+          break;
+        }
+        const id = inventoryBackSlots[i];
+        if (!id || !activeSet.has(id)) {
+          continue;
+        }
+        if (pendingBackToFrontId && id === pendingBackToFrontId) {
+          continue;
+        }
+        inventoryFrontSlots[freeFrontSlot] = id;
+        inventoryBackSlots[i] = null;
+        freeFrontSlot = getFirstFreeFrontSlotIndex();
+      }
+    }
+
+    const pendingController = pendingBackToFrontId ? (blocks.get(pendingBackToFrontId) || null) : null;
+    if (pendingBackToFrontId && (!pendingController || pendingController.getCount() <= 0)) {
       pendingBackToFrontId = null;
       pendingBackToFrontSlot = -1;
     }
@@ -5613,8 +5660,10 @@
     }
     if (pendingQueueLayoutRefresh) {
       pendingQueueLayoutRefresh = false;
+      applyInventoryQueueState(getActiveQueueIdsOrdered());
+    } else {
+      applyInventoryQueueLayout();
     }
-    applyInventoryQueueLayout();
     refreshUiLockState();
     if (pendingClickBlockId) {
       const queuedId = pendingClickBlockId;
@@ -5633,11 +5682,13 @@
   const initialCountsByType = getLevelCountsByType();
 
   function syncInventoryAnchors() {
-    if (activeBlockId !== null) {
-      return;
-    }
     for (const [id, controller] of blocks.entries()) {
       if (!controller) {
+        continue;
+      }
+      if (activeBlockId !== null && id === activeBlockId) {
+        // Active block is currently animated (launch/ride/return),
+        // keep its transform controlled by the cycle animation.
         continue;
       }
       const anchor = worldInventory.getSlotAnchor(id);
@@ -5684,15 +5735,27 @@
   applyInventorySpinAngle();
   let lastBuiltCount = buildManager.getBuiltCount();
 
+  function getActiveQueueIdsOrdered() {
+    return buildManager.getCurrentLayerPendingInventoryIds();
+  }
+
+  function applyInventoryQueueState(activeIdsOrdered) {
+    for (const controller of blocks.values()) {
+      if (!controller) {
+        continue;
+      }
+      if (controller.getCount() <= 0) {
+        removeIdFromInventoryZones(controller.id);
+      }
+    }
+    syncInventoryQueueState(activeIdsOrdered);
+    applyInventoryQueueLayout();
+  }
+
   function syncBlockCountsFromLevel() {
     const activeQueue = buildManager.getCurrentLayerQueue();
     const statsByType = buildManager.getSlotInventoryStats();
-    const activeIdsOrdered = activeQueue
-      .map((entry) => entry.id)
-      .filter((id) => {
-        const stat = statsByType[id];
-        return Boolean(stat) && stat.count > 0;
-      });
+    const activeIdsOrdered = getActiveQueueIdsOrdered();
     for (const controller of blocks.values()) {
       const stat = statsByType[controller.id] || null;
       const count = stat ? stat.count : 0;
@@ -5700,16 +5763,12 @@
         controller.setAppearance(stat.type || controller.type, stat.textureKey);
       }
       controller.setCount(count);
-      if (count <= 0) {
-        removeIdFromInventoryZones(controller.id);
-      }
     }
-    syncInventoryQueueState(activeIdsOrdered);
     if (activeBlockId !== null || minecart.isMoving()) {
       pendingQueueLayoutRefresh = true;
     } else {
       pendingQueueLayoutRefresh = false;
-      applyInventoryQueueLayout();
+      applyInventoryQueueState(activeIdsOrdered);
     }
     lastBuiltCount = buildManager.getBuiltCount();
   }
@@ -6556,7 +6615,7 @@
     }
     if (pendingQueueLayoutRefresh && activeBlockId === null && !minecart.isMoving()) {
       pendingQueueLayoutRefresh = false;
-      applyInventoryQueueLayout();
+      applyInventoryQueueState(getActiveQueueIdsOrdered());
       refreshUiLockState();
     }
     flushPendingClick();
