@@ -1094,7 +1094,7 @@
 
   function createVoxelTerrain(scene) {
     const group = new THREE.Group();
-    const halfSize = 28;
+    const halfSize = 52;
     const clearRadius = 11;
     const minLayer = -1;
     const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
@@ -1153,19 +1153,26 @@
     const trunkTransforms = [];
     const leafTransforms = [];
     const treeAnchors = [];
-    const minTreeDistance = 4;
+    const baseMinTreeDistance = 3;
+    // Keep forest far from the build center so win-camera orbit has clear sight lines.
+    const forestInnerRadius = Math.max(clearRadius + 10, 44);
 
     for (let gx = -halfSize + 3; gx <= halfSize - 3; gx += 1) {
       for (let gz = -halfSize + 3; gz <= halfSize - 3; gz += 1) {
         const distance = Math.hypot(gx, gz);
-        if (distance <= clearRadius + 6 || distance >= halfSize - 2) {
+        if (distance <= forestInnerRadius || distance >= halfSize - 1) {
           continue;
         }
 
-        if (hashNoise2D(gx * 0.71 + 17, gz * 0.71 - 9) < 0.92) {
+        // Boost tree density at the "back" side of the scene (negative X),
+        // so the background reads as a denser forest behind the build area.
+        const backFactor = THREE.MathUtils.clamp((-gx - 2) / (halfSize * 0.78), 0, 1);
+        const spawnThreshold = lerp(0.9, 0.68, backFactor);
+        if (hashNoise2D(gx * 0.71 + 17, gz * 0.71 - 9) < spawnThreshold) {
           continue;
         }
 
+        const minTreeDistance = Math.max(2, baseMinTreeDistance - (backFactor > 0.45 ? 1 : 0));
         let blocked = false;
         for (const prev of treeAnchors) {
           if (Math.abs(prev.x - gx) < minTreeDistance && Math.abs(prev.z - gz) < minTreeDistance) {
@@ -2199,6 +2206,58 @@
 
     getTotalCount() {
       return this.slots.length;
+    }
+
+    commitAll() {
+      let committed = 0;
+      for (let i = 0; i < this.slots.length; i += 1) {
+        if (this.commit(i)) {
+          committed += 1;
+        }
+      }
+      return committed;
+    }
+
+    getBuildBounds() {
+      if (!this.slots || this.slots.length === 0) {
+        return null;
+      }
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      let minZ = Infinity;
+      let maxZ = -Infinity;
+      for (const slot of this.slots) {
+        if (!slot || !slot.position) {
+          continue;
+        }
+        minX = Math.min(minX, slot.position.x);
+        maxX = Math.max(maxX, slot.position.x);
+        minY = Math.min(minY, slot.position.y);
+        maxY = Math.max(maxY, slot.position.y);
+        minZ = Math.min(minZ, slot.position.z);
+        maxZ = Math.max(maxZ, slot.position.z);
+      }
+      if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(minZ)) {
+        return null;
+      }
+      return {
+        minX,
+        maxX,
+        minY,
+        maxY,
+        minZ,
+        maxZ,
+        center: new THREE.Vector3(
+          (minX + maxX) * 0.5,
+          (minY + maxY) * 0.5,
+          (minZ + maxZ) * 0.5,
+        ),
+        sizeX: maxX - minX,
+        sizeY: maxY - minY,
+        sizeZ: maxZ - minZ,
+      };
     }
 
     getSlotTypeCounts() {
@@ -3484,6 +3543,39 @@
       }
     }
 
+    forceStopCycle({ depleted = false } = {}) {
+      this.state = depleted ? 'depleted' : 'idle';
+      this.phaseTime = 0;
+      this.spawnTimer = 0;
+      this.stickyLane = null;
+
+      for (const projectile of this.projectiles) {
+        this.disposeProjectileTrail(projectile);
+        if (projectile && projectile.mesh) {
+          this.scene.remove(projectile.mesh);
+          disposeObject3D(projectile.mesh);
+        }
+      }
+      this.projectiles = [];
+
+      for (const burst of this.impactBursts) {
+        if (burst.mesh) {
+          this.scene.remove(burst.mesh);
+        }
+        if (burst.material) {
+          burst.material.dispose();
+        }
+        if (burst.ring) {
+          this.scene.remove(burst.ring);
+        }
+        if (burst.ringMaterial) {
+          burst.ringMaterial.dispose();
+        }
+      }
+      this.impactBursts = [];
+      this.applyCarrierVisibility();
+    }
+
     updateCountVisual() {
       drawCountTexture(this.countCanvas, this.countTexture, this.count, this.count <= 0);
     }
@@ -3560,6 +3652,12 @@
 
     isMoving() {
       return this.isRolling;
+    }
+
+    stop() {
+      this.isRolling = false;
+      this.remainingDistance = 0;
+      this.syncToTrackPosition();
     }
 
     startSingleLap() {
@@ -4490,6 +4588,7 @@
     }));
   }
   const debugEditor = document.getElementById('debug-editor');
+  const winBanner = document.getElementById('win-banner');
   const inventoryMoveEnabledInput = document.getElementById('inventory-move-enabled');
   const DEFAULT_INVENTORY_ZONE = {
     x: 19.17,
@@ -4744,11 +4843,299 @@
     }
   }
 
+  class CelebrationController {
+    constructor(options) {
+      this.scene = options.scene;
+      this.camera = options.camera;
+      this.buildManager = options.buildManager;
+      this.getFlyCamEnabled = typeof options.getFlyCamEnabled === 'function'
+        ? options.getFlyCamEnabled
+        : (() => false);
+      this.onCameraChanged = typeof options.onCameraChanged === 'function'
+        ? options.onCameraChanged
+        : null;
+      this.onStateChange = typeof options.onStateChange === 'function'
+        ? options.onStateChange
+        : null;
+
+      this.active = false;
+      this.elapsed = 0;
+      this.duration = 14;
+      this.introDuration = 1.4;
+      this.orbitSpeed = 0.42;
+      this.orbitRadius = 10;
+      this.orbitHeight = 5;
+      this.startOrbitAngle = 0;
+      this.previewEnabled = false;
+      this.manualDistance = 16;
+      this.previewYaw = Math.PI * 0.5;
+      this.previewPitch = 0.48;
+
+      this.target = new THREE.Vector3(0, 0, 0);
+      this.startCameraPosition = new THREE.Vector3();
+      this.savedCameraPosition = new THREE.Vector3();
+      this.savedCameraQuaternion = new THREE.Quaternion();
+      this._tmpDesired = new THREE.Vector3();
+
+      this.confetti = null;
+    }
+
+    isActive() {
+      return this.active;
+    }
+
+    setPreviewEnabled(enabled) {
+      this.previewEnabled = Boolean(enabled);
+    }
+
+    setDistance(value) {
+      const next = Number(value);
+      if (!Number.isFinite(next)) {
+        return;
+      }
+      this.manualDistance = THREE.MathUtils.clamp(next, 8, 80);
+    }
+
+    getCurrentFocus(bounds) {
+      const safeBounds = bounds || this.buildManager.getBuildBounds();
+      if (!safeBounds) {
+        return null;
+      }
+      return {
+        bounds: safeBounds,
+        target: new THREE.Vector3(
+          safeBounds.center.x,
+          safeBounds.minY + (safeBounds.sizeY * 0.45),
+          safeBounds.center.z,
+        ),
+      };
+    }
+
+    start() {
+      if (this.active) {
+        return;
+      }
+      const focus = this.getCurrentFocus();
+      if (!focus) {
+        return;
+      }
+      const { bounds, target } = focus;
+
+      this.savedCameraPosition.copy(this.camera.position);
+      this.savedCameraQuaternion.copy(this.camera.quaternion);
+      this.startCameraPosition.copy(this.camera.position);
+      this.target.copy(target);
+
+      const footprintRadius = Math.max(bounds.sizeX, bounds.sizeZ) * 0.5;
+      this.orbitRadius = Math.max(this.manualDistance, footprintRadius + 9.5);
+      this.orbitHeight = Math.max(4.4, bounds.sizeY + 3.2);
+      this.startOrbitAngle = Math.atan2(
+        this.camera.position.z - this.target.z,
+        this.camera.position.x - this.target.x,
+      );
+
+      this.createConfetti(bounds);
+      this.elapsed = 0;
+      this.active = true;
+      if (this.onStateChange) {
+        this.onStateChange(true);
+      }
+    }
+
+    stop() {
+      if (!this.active) {
+        return;
+      }
+      this.active = false;
+      this.elapsed = 0;
+      if (!this.getFlyCamEnabled()) {
+        this.camera.position.copy(this.savedCameraPosition);
+        this.camera.quaternion.copy(this.savedCameraQuaternion);
+        if (this.onCameraChanged) {
+          this.onCameraChanged();
+        }
+      }
+      this.disposeConfetti();
+      if (this.onStateChange) {
+        this.onStateChange(false);
+      }
+    }
+
+    updateCamera(desiredPosition, target, blend = 1) {
+      if (blend >= 0.999) {
+        this.camera.position.copy(desiredPosition);
+      } else {
+        this.camera.position.lerpVectors(this.camera.position, desiredPosition, THREE.MathUtils.clamp(blend, 0, 1));
+      }
+      this.camera.lookAt(target);
+      if (this.onCameraChanged) {
+        this.onCameraChanged();
+      }
+    }
+
+    updatePreviewCamera() {
+      if (this.active || !this.previewEnabled || this.getFlyCamEnabled()) {
+        return;
+      }
+      const focus = this.getCurrentFocus();
+      if (!focus) {
+        return;
+      }
+      const { bounds, target } = focus;
+      const footprintRadius = Math.max(bounds.sizeX, bounds.sizeZ) * 0.5;
+      const dist = Math.max(this.manualDistance, footprintRadius + 8);
+      const horizontal = Math.max(0.001, Math.cos(this.previewPitch) * dist);
+      this._tmpDesired.set(
+        target.x + Math.cos(this.previewYaw) * horizontal,
+        target.y + Math.sin(this.previewPitch) * dist + Math.max(2.6, bounds.sizeY * 0.55),
+        target.z + Math.sin(this.previewYaw) * horizontal,
+      );
+      this.updateCamera(this._tmpDesired, target, 1);
+    }
+
+    update(dt) {
+      if (!this.active) {
+        this.updatePreviewCamera();
+        return;
+      }
+      this.elapsed += dt;
+      this.updateConfetti(dt);
+
+      if (this.elapsed >= this.duration) {
+        this.stop();
+        return;
+      }
+      if (this.getFlyCamEnabled()) {
+        return;
+      }
+
+      this._tmpDesired.set(
+        this.target.x + Math.cos(this.startOrbitAngle + this.elapsed * this.orbitSpeed) * this.orbitRadius,
+        this.target.y + this.orbitHeight,
+        this.target.z + Math.sin(this.startOrbitAngle + this.elapsed * this.orbitSpeed) * this.orbitRadius,
+      );
+      const introProgress = Math.min(1, this.elapsed / this.introDuration);
+      const easedIntro = easeInOutCubic(introProgress);
+      this._tmpDesired.lerpVectors(this.startCameraPosition, this._tmpDesired, easedIntro);
+      this.updateCamera(this._tmpDesired, this.target, 1);
+    }
+
+    createConfetti(bounds) {
+      this.disposeConfetti();
+
+      const count = 520;
+      const positions = new Float32Array(count * 3);
+      const colors = new Float32Array(count * 3);
+      const velocities = new Float32Array(count * 3);
+      const colorPalette = [
+        new THREE.Color(0xff5e7a),
+        new THREE.Color(0xffcf47),
+        new THREE.Color(0x63e987),
+        new THREE.Color(0x5cc2ff),
+        new THREE.Color(0xff8a3d),
+      ];
+      const areaRadius = Math.max(bounds.sizeX, bounds.sizeZ) * 0.95 + 7.5;
+      const topY = bounds.maxY + 9;
+      const bottomY = bounds.minY - 2;
+
+      const resetParticle = (index, randomizeY) => {
+        const stride = index * 3;
+        const angle = Math.random() * Math.PI * 2;
+        const radial = Math.pow(Math.random(), 0.7) * areaRadius;
+        positions[stride] = this.target.x + Math.cos(angle) * radial;
+        positions[stride + 1] = randomizeY
+          ? (this.target.y + Math.random() * (topY - bottomY))
+          : topY;
+        positions[stride + 2] = this.target.z + Math.sin(angle) * radial;
+
+        velocities[stride] = (Math.random() - 0.5) * 1.1;
+        velocities[stride + 1] = -2.8 - Math.random() * 1.7;
+        velocities[stride + 2] = (Math.random() - 0.5) * 1.1;
+
+        const color = colorPalette[Math.floor(Math.random() * colorPalette.length)];
+        colors[stride] = color.r;
+        colors[stride + 1] = color.g;
+        colors[stride + 2] = color.b;
+      };
+
+      for (let i = 0; i < count; i += 1) {
+        resetParticle(i, true);
+      }
+
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      const material = new THREE.PointsMaterial({
+        size: 0.38,
+        sizeAttenuation: true,
+        vertexColors: true,
+        transparent: true,
+        opacity: 1,
+        depthTest: false,
+        depthWrite: false,
+      });
+      const points = new THREE.Points(geometry, material);
+      points.frustumCulled = false;
+      this.scene.add(points);
+
+      this.confetti = {
+        points,
+        geometry,
+        material,
+        positions,
+        velocities,
+        topY,
+        bottomY,
+        areaRadius,
+        resetParticle,
+      };
+    }
+
+    updateConfetti(dt) {
+      if (!this.confetti) {
+        return;
+      }
+      const c = this.confetti;
+      const gravity = 7.9;
+      const swirl = 1.25;
+      for (let i = 0; i < c.positions.length; i += 3) {
+        c.velocities[i + 1] -= gravity * dt;
+        c.positions[i] += (c.velocities[i] + Math.sin((this.elapsed * 3.2) + i) * swirl * 0.08) * dt;
+        c.positions[i + 1] += c.velocities[i + 1] * dt;
+        c.positions[i + 2] += (c.velocities[i + 2] + Math.cos((this.elapsed * 2.7) + i) * swirl * 0.08) * dt;
+
+        if (c.positions[i + 1] < c.bottomY) {
+          c.resetParticle(i / 3, false);
+        }
+      }
+      c.geometry.attributes.position.needsUpdate = true;
+    }
+
+    disposeConfetti() {
+      if (!this.confetti) {
+        return;
+      }
+      this.scene.remove(this.confetti.points);
+      this.confetti.geometry.dispose();
+      this.confetti.material.dispose();
+      this.confetti = null;
+    }
+  }
+
   function applyUiVisibility() {
     debugEditor.style.display = uiHidden ? 'none' : '';
     const visible = !uiHidden;
     editor.setVisible(visible);
     buildManager.setVisible(visible);
+  }
+
+  function setWinBannerVisible(visible) {
+    if (!winBanner) {
+      return;
+    }
+    const isVisible = Boolean(visible);
+    winBanner.classList.toggle('is-visible', isVisible);
+    winBanner.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
   }
 
   function getEditorBlocksSnapshot() {
@@ -5734,6 +6121,47 @@
   syncInventoryAnchors();
   applyInventorySpinAngle();
   let lastBuiltCount = buildManager.getBuiltCount();
+  const celebration = new CelebrationController({
+    scene,
+    camera,
+    buildManager,
+    getFlyCamEnabled: () => flyCamEnabled,
+    onCameraChanged: () => {
+      syncCameraDebugFromCameraObject();
+      if (typeof syncCameraInputsFromState === 'function') {
+        syncCameraInputsFromState();
+      }
+    },
+    onStateChange: (active) => {
+      setWinBannerVisible(active);
+    },
+  });
+  let winCamPreviewEnabled = false;
+  let winCamDistance = 42.5;
+  celebration.setPreviewEnabled(winCamPreviewEnabled);
+  celebration.setDistance(winCamDistance);
+  let wasBuildComplete = false;
+
+  function instantCompleteLevel() {
+    for (const controller of blocks.values()) {
+      if (!controller) {
+        continue;
+      }
+      controller.forceStopCycle({ depleted: true });
+      controller.setCount(0);
+    }
+    activeBlockId = null;
+    pendingBackToFrontId = null;
+    pendingBackToFrontSlot = -1;
+    pendingClickBlockId = null;
+    pendingQueueLayoutRefresh = false;
+    minecart.stop();
+    buildManager.commitAll();
+    syncBlockCountsFromLevel();
+    refreshUiLockState();
+    wasBuildComplete = false;
+    celebration.start();
+  }
 
   function getActiveQueueIdsOrdered() {
     return buildManager.getCurrentLayerPendingInventoryIds();
@@ -5825,6 +6253,7 @@
     const levelOpenFileBtn = document.getElementById('level-open-file');
     const levelFileInput = document.getElementById('level-file-input');
     const clearBuildingBtn = document.getElementById('editor-clear-building');
+    const levelCompleteInstantBtn = document.getElementById('level-complete-instant');
     const railEnabledInput = document.getElementById('rail-enabled');
     const railTypeSelect = document.getElementById('rail-type');
     const railRotSelect = document.getElementById('rail-rot');
@@ -5842,6 +6271,8 @@
     const doorHeightInput = document.getElementById('door-height');
     const doorThicknessInput = document.getElementById('door-thickness');
     const cameraFlyEnabledInput = document.getElementById('cam-fly-enabled');
+    const winCamEnabledInput = document.getElementById('cam-win-enabled');
+    const winCamDistanceInput = document.getElementById('cam-win-distance');
     const cameraLookAtEnabledInput = document.getElementById('cam-lookat-enabled');
     const cameraPosXInput = document.getElementById('cam-pos-x');
     const cameraPosYInput = document.getElementById('cam-pos-y');
@@ -5987,6 +6418,12 @@
 
     function setCameraInputsFromState() {
       cameraFlyEnabledInput.checked = flyCamEnabled;
+      if (winCamEnabledInput) {
+        winCamEnabledInput.checked = winCamPreviewEnabled;
+      }
+      if (winCamDistanceInput) {
+        winCamDistanceInput.value = winCamDistance.toFixed(2);
+      }
       cameraLookAtEnabledInput.checked = Boolean(cameraDebugState.useLookAt);
       cameraPosXInput.value = cameraDebugState.position.x.toFixed(3);
       cameraPosYInput.value = cameraDebugState.position.y.toFixed(3);
@@ -6336,6 +6773,11 @@
         editor.clear();
       });
     }
+    if (levelCompleteInstantBtn) {
+      levelCompleteInstantBtn.addEventListener('click', () => {
+        instantCompleteLevel();
+      });
+    }
 
     railEnabledInput.addEventListener('change', () => {
       railEditor.setEnabled(railEnabledInput.checked);
@@ -6432,6 +6874,26 @@
       setFlyCamEnabled(cameraFlyEnabledInput.checked);
       setCameraInputsFromState();
     });
+    if (winCamEnabledInput) {
+      winCamEnabledInput.addEventListener('change', () => {
+        winCamPreviewEnabled = Boolean(winCamEnabledInput.checked);
+        celebration.setPreviewEnabled(winCamPreviewEnabled);
+        if (!winCamPreviewEnabled) {
+          celebration.stop();
+        }
+        setCameraInputsFromState();
+      });
+    }
+    if (winCamDistanceInput) {
+      const applyWinCamDistance = () => {
+        winCamDistance = toFiniteNumber(winCamDistanceInput.value, winCamDistance);
+        winCamDistance = THREE.MathUtils.clamp(winCamDistance, 8, 80);
+        celebration.setDistance(winCamDistance);
+        winCamDistanceInput.value = winCamDistance.toFixed(2);
+      };
+      winCamDistanceInput.addEventListener('input', applyWinCamDistance);
+      winCamDistanceInput.addEventListener('change', applyWinCamDistance);
+    }
     for (const input of [
       cameraLookAtEnabledInput,
       cameraPosXInput,
@@ -6608,17 +7070,26 @@
       worldInventory.setCooldown(false, 0, null);
     }
     const builtCountNow = buildManager.getBuiltCount();
+    const totalCountNow = buildManager.getTotalCount();
+    const isBuildCompleteNow = totalCountNow > 0 && builtCountNow >= totalCountNow;
     if (builtCountNow !== lastBuiltCount) {
       lastBuiltCount = builtCountNow;
       syncBlockCountsFromLevel();
       refreshUiLockState();
     }
+    if (isBuildCompleteNow && !wasBuildComplete) {
+      celebration.start();
+    } else if (!isBuildCompleteNow && wasBuildComplete) {
+      celebration.stop();
+    }
+    wasBuildComplete = isBuildCompleteNow;
     if (pendingQueueLayoutRefresh && activeBlockId === null && !minecart.isMoving()) {
       pendingQueueLayoutRefresh = false;
       applyInventoryQueueState(getActiveQueueIdsOrdered());
       refreshUiLockState();
     }
     flushPendingClick();
+    celebration.update(dt);
 
     renderer.render(scene, camera);
   }
