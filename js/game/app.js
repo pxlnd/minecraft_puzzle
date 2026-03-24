@@ -3,6 +3,7 @@
   const PIECE_GEOMETRY = new THREE.BoxGeometry(0.32, 0.32, 0.32);
   const IMPACT_BURST_GEOMETRY = new THREE.SphereGeometry(1, 8, 8);
   const IMPACT_RING_GEOMETRY = new THREE.RingGeometry(0.55, 0.78, 28);
+  const UNAVAILABLE_FLASH_COLOR = new THREE.Color(0xff4747);
 
   const TEMP_A = new THREE.Vector3();
   const TEMP_B = new THREE.Vector3();
@@ -1874,7 +1875,7 @@
           })
           .sort((a, b) => (
             (a.y - b.y)
-            || (b.ring - a.ring)
+            || (a.ring - b.ring)
             || (a.angle - b.angle)
             || (a.radialSq - b.radialSq)
             || (a.index - b.index)
@@ -1903,11 +1904,8 @@
       }
     }
 
-    reserveNext(inventoryKey, origin = null, forward = null) {
+    reserveNext(inventoryKey, origin = null, forward = null, laneLock = null) {
       void forward;
-      let selectedIndex = -1;
-      let selectedOrder = Infinity;
-      let selectedDistanceSq = Infinity;
       const hasOrigin = origin && Number.isFinite(origin.x) && Number.isFinite(origin.z);
       const EPS_Y = this.cellSize * 0.01;
 
@@ -1925,54 +1923,156 @@
         return null;
       }
 
-      const sideX = hasOrigin ? origin.x - this.center.x : 0;
-      const sideZ = hasOrigin ? origin.z - this.center.z : 0;
+      const sideX = hasOrigin ? (origin.x - this.center.x) : 0;
+      const sideZ = hasOrigin ? (origin.z - this.center.z) : 0;
       const sideLen = Math.hypot(sideX, sideZ);
-      const nx = sideLen > 1e-6 ? sideX / sideLen : 0;
-      const nz = sideLen > 1e-6 ? sideZ / sideLen : 0;
-      // Half-plane constraint: target must be on the same opposite side as the minecart,
-      // but without a narrow cone that can miss slots during motion.
-      const minSectorCos = 0;
-      const minOuterBand = this.cellSize * 0.58;
+      const nsx = sideLen > 1e-6 ? sideX / sideLen : 0;
+      const nsz = sideLen > 1e-6 ? sideZ / sideLen : 0;
 
-      for (let i = 0; i < this.slots.length; i += 1) {
-        const slot = this.slots[i];
-        if (slot.state !== 'free') {
-          continue;
-        }
-        if (slot.inventoryKey !== inventoryKey) {
-          continue;
-        }
-        // Strict bottom-up build: nothing above the lowest free layer may be placed.
-        if (slot.position.y > globalMinFreeY + EPS_Y) {
-          continue;
-        }
+      const inwardX = hasOrigin ? (this.center.x - origin.x) : 0;
+      const inwardZ = hasOrigin ? (this.center.z - origin.z) : 0;
+      const inwardLen = Math.hypot(inwardX, inwardZ);
+      const nix = inwardLen > 1e-6 ? inwardX / inwardLen : 0;
+      const niz = inwardLen > 1e-6 ? inwardZ / inwardLen : 0;
 
-        // Shoot only into the sector directly opposite the current minecart side.
-        if (hasOrigin && sideLen > 1e-6) {
-          const slotSideX = slot.position.x - this.center.x;
-          const slotSideZ = slot.position.z - this.center.z;
-          const slotLen = Math.hypot(slotSideX, slotSideZ);
-          if (slotLen >= minOuterBand) {
-            const sx = slotSideX / slotLen;
-            const sz = slotSideZ / slotLen;
-            const sectorCos = (sx * nx) + (sz * nz);
-            if (sectorCos < minSectorCos) {
+      const minSideCos = -0.12;
+      // Allow a short grace zone behind the cart so near-missed cells are still filled
+      // in the same pass instead of waiting for the next lap.
+      const strictMinInwardProjection = -this.cellSize * 0.9;
+      const hasLaneLock = Boolean(
+        laneLock
+          && (laneLock.axis === 'x' || laneLock.axis === 'z')
+          && Number.isFinite(laneLock.value),
+      );
+      const laneTolerance = this.cellSize * 0.34;
+
+      const pickCandidate = (strictOpposite) => {
+        let selectedIndex = -1;
+        let selectedLateralSq = Infinity;
+        let selectedInwardProjection = Infinity;
+        let selectedLaneDelta = Infinity;
+        let selectedOrder = Infinity;
+        let selectedDistanceSq = Infinity;
+
+        for (let i = 0; i < this.slots.length; i += 1) {
+          const slot = this.slots[i];
+          if (slot.state !== 'free') {
+            continue;
+          }
+          if (slot.inventoryKey !== inventoryKey) {
+            continue;
+          }
+          if (slot.position.y > globalMinFreeY + EPS_Y) {
+            continue;
+          }
+
+          let laneDelta = 0;
+          if (hasLaneLock) {
+            const slotLaneValue = laneLock.axis === 'x' ? slot.position.x : slot.position.z;
+            laneDelta = Math.abs(slotLaneValue - laneLock.value);
+            if (laneDelta > laneTolerance) {
               continue;
             }
           }
+
+          if (hasOrigin && sideLen > 1e-6) {
+            const slotSideX = slot.position.x - this.center.x;
+            const slotSideZ = slot.position.z - this.center.z;
+            const slotSideLen = Math.hypot(slotSideX, slotSideZ);
+            if (slotSideLen > this.cellSize * 0.16) {
+              const nslotX = slotSideX / slotSideLen;
+              const nslotZ = slotSideZ / slotSideLen;
+              const sideCos = (nslotX * nsx) + (nslotZ * nsz);
+              if (sideCos < minSideCos) {
+                continue;
+              }
+            }
+          }
+
+          let inwardProjection = 0;
+          let effectiveInwardProjection = 0;
+          let lateralSq = 0;
+          if (hasOrigin && inwardLen > 1e-6) {
+            const toSlotX = slot.position.x - origin.x;
+            const toSlotZ = slot.position.z - origin.z;
+            inwardProjection = (toSlotX * nix) + (toSlotZ * niz);
+            if (strictOpposite && inwardProjection < strictMinInwardProjection) {
+              continue;
+            }
+            effectiveInwardProjection = Math.max(0, inwardProjection);
+            const toSlotLenSq = (toSlotX * toSlotX) + (toSlotZ * toSlotZ);
+            lateralSq = Math.max(0, toSlotLenSq - (inwardProjection * inwardProjection));
+          }
+
+          const dx = hasOrigin ? (slot.position.x - origin.x) : (slot.position.x - this.center.x);
+          const dz = hasOrigin ? (slot.position.z - origin.z) : (slot.position.z - this.center.z);
+          const distanceSq = (dx * dx) + (dz * dz);
+          const order = Number.isFinite(slot.buildOrder) ? slot.buildOrder : Number.MAX_SAFE_INTEGER;
+
+          if (hasLaneLock) {
+            if (
+              effectiveInwardProjection < selectedInwardProjection - 1e-6
+              || (
+                Math.abs(effectiveInwardProjection - selectedInwardProjection) <= 1e-6
+                && (
+                  laneDelta < selectedLaneDelta - 1e-6
+                  || (
+                    Math.abs(laneDelta - selectedLaneDelta) <= 1e-6
+                    && (
+                      order < selectedOrder
+                      || (
+                        order === selectedOrder
+                        && distanceSq < selectedDistanceSq - 1e-6
+                      )
+                    )
+                  )
+                )
+              )
+            ) {
+              selectedIndex = i;
+              selectedLateralSq = lateralSq;
+              selectedInwardProjection = effectiveInwardProjection;
+              selectedLaneDelta = laneDelta;
+              selectedOrder = order;
+              selectedDistanceSq = distanceSq;
+            }
+          } else if (
+            lateralSq < selectedLateralSq - 1e-6
+            || (
+              Math.abs(lateralSq - selectedLateralSq) <= 1e-6
+              && (
+                effectiveInwardProjection < selectedInwardProjection - 1e-6
+                || (
+                  Math.abs(effectiveInwardProjection - selectedInwardProjection) <= 1e-6
+                  && (
+                    order < selectedOrder
+                    || (
+                      order === selectedOrder
+                      && distanceSq < selectedDistanceSq - 1e-6
+                    )
+                  )
+                )
+              )
+            )
+          ) {
+            selectedIndex = i;
+            selectedLateralSq = lateralSq;
+            selectedInwardProjection = effectiveInwardProjection;
+            selectedLaneDelta = laneDelta;
+            selectedOrder = order;
+            selectedDistanceSq = distanceSq;
+          }
         }
 
-        const dx = hasOrigin ? (slot.position.x - origin.x) : (slot.position.x - this.center.x);
-        const dz = hasOrigin ? (slot.position.z - origin.z) : (slot.position.z - this.center.z);
-        const distanceSq = (dx * dx) + (dz * dz);
-        const order = Number.isFinite(slot.buildOrder) ? slot.buildOrder : Number.MAX_SAFE_INTEGER;
-        if (order < selectedOrder || (order === selectedOrder && distanceSq < selectedDistanceSq)) {
-          selectedOrder = order;
-          selectedDistanceSq = distanceSq;
-          selectedIndex = i;
-        }
+        return selectedIndex;
+      };
+
+      let selectedIndex = pickCandidate(true);
+      if (selectedIndex < 0) {
+        // If strict opposite window has passed, still finish nearby same-side cells.
+        selectedIndex = pickCandidate(false);
       }
+
       if (selectedIndex >= 0) {
         this.slots[selectedIndex].state = 'reserved';
         return { index: selectedIndex, position: this.slots[selectedIndex].position.clone() };
@@ -1980,11 +2080,7 @@
       return null;
     }
 
-    hasFreeSlotForType(inventoryKey) {
-      return this.slots.some((slot) => slot.state === 'free' && slot.inventoryKey === inventoryKey);
-    }
-
-    hasPlaceableSlotForType(inventoryKey) {
+    getCurrentLayerFreeY() {
       let globalMinFreeY = Infinity;
       for (const slot of this.slots) {
         if (slot.state !== 'free') {
@@ -1994,15 +2090,63 @@
           globalMinFreeY = slot.position.y;
         }
       }
-      if (!Number.isFinite(globalMinFreeY)) {
-        return false;
+      return Number.isFinite(globalMinFreeY) ? globalMinFreeY : null;
+    }
+
+    getCurrentLayerFreeSlotsOrdered() {
+      const minY = this.getCurrentLayerFreeY();
+      if (!Number.isFinite(minY)) {
+        return [];
       }
       const EPS_Y = this.cellSize * 0.01;
-      return this.slots.some((slot) => (
-        slot.state === 'free'
-        && slot.inventoryKey === inventoryKey
-        && slot.position.y <= globalMinFreeY + EPS_Y
-      ));
+      return this.slots
+        .filter((slot) => slot.state === 'free' && slot.position.y <= minY + EPS_Y)
+        .slice()
+        .sort((a, b) => {
+          const aOrder = Number.isFinite(a.buildOrder) ? a.buildOrder : Number.MAX_SAFE_INTEGER;
+          const bOrder = Number.isFinite(b.buildOrder) ? b.buildOrder : Number.MAX_SAFE_INTEGER;
+          return aOrder - bOrder;
+        });
+    }
+
+    getNextRequiredInventoryKey() {
+      const slot = this.getNextRequiredSlot();
+      if (!slot) {
+        return null;
+      }
+      return slot.inventoryKey || null;
+    }
+
+    getNextRequiredSlot() {
+      const orderedLayerSlots = this.getCurrentLayerFreeSlotsOrdered();
+      if (orderedLayerSlots.length === 0) {
+        return null;
+      }
+      return orderedLayerSlots[0];
+    }
+
+    hasFreeSlotForType(inventoryKey) {
+      return this.slots.some((slot) => slot.state === 'free' && slot.inventoryKey === inventoryKey);
+    }
+
+    getFreeSlotCountForType(inventoryKey) {
+      let count = 0;
+      for (const slot of this.slots) {
+        if (slot.state === 'free' && slot.inventoryKey === inventoryKey) {
+          count += 1;
+        }
+      }
+      return count;
+    }
+
+    hasPlaceableSlotForType(inventoryKey) {
+      const orderedLayerSlots = this.getCurrentLayerFreeSlotsOrdered();
+      for (const slot of orderedLayerSlots) {
+        if (slot && slot.inventoryKey === inventoryKey) {
+          return true;
+        }
+      }
+      return false;
     }
 
     commit(index) {
@@ -2046,26 +2190,41 @@
 
     getSlotTypeCounts() {
       const counts = {};
-      for (const slot of this.slots) {
-        counts[slot.inventoryKey] = (counts[slot.inventoryKey] || 0) + 1;
+      for (const item of this.getCurrentLayerQueue()) {
+        counts[item.id] = item.count;
       }
       return counts;
     }
 
     getSlotInventoryStats() {
       const stats = {};
-      for (const slot of this.slots) {
+      for (const item of this.getCurrentLayerQueue()) {
+        stats[item.id] = {
+          count: item.count,
+          type: item.type,
+          textureKey: item.textureKey,
+        };
+      }
+      return stats;
+    }
+
+    getCurrentLayerQueue() {
+      const queue = [];
+      const byInventoryKey = new Map();
+      for (const slot of this.getCurrentLayerFreeSlotsOrdered()) {
         if (!slot || !slot.inventoryKey) {
           continue;
         }
-        let entry = stats[slot.inventoryKey];
+        let entry = byInventoryKey.get(slot.inventoryKey);
         if (!entry) {
           entry = {
+            id: slot.inventoryKey,
             count: 0,
             type: slot.type,
             textureKey: slot.textureKey,
           };
-          stats[slot.inventoryKey] = entry;
+          byInventoryKey.set(slot.inventoryKey, entry);
+          queue.push(entry);
         }
         entry.count += 1;
         if (
@@ -2077,7 +2236,7 @@
           entry.type = slot.type;
         }
       }
-      return stats;
+      return queue;
     }
 
     setVisible(visible) {
@@ -2328,6 +2487,38 @@
       }
     }
 
+    setQueueLayout(layoutItems) {
+      const layoutMap = new Map();
+      const list = Array.isArray(layoutItems) ? layoutItems : [];
+      for (const item of list) {
+        if (!item || !item.id || !Number.isFinite(item.x) || !Number.isFinite(item.z)) {
+          continue;
+        }
+        layoutMap.set(item.id, {
+          x: item.x,
+          z: item.z,
+          visible: item.visible !== false,
+        });
+      }
+
+      for (const slot of this.slots.values()) {
+        const layout = layoutMap.get(slot.id);
+        if (!layout) {
+          slot.visible = false;
+          slot.clickPad.visible = false;
+          continue;
+        }
+        slot.anchor.set(layout.x, 1.02, layout.z);
+        slot.clickPad.position.set(layout.x, 0.5, layout.z);
+        slot.visible = layout.visible;
+        slot.clickPad.visible = layout.visible;
+      }
+
+      for (const slot of this.slots.values()) {
+        this.applySlotState(slot);
+      }
+    }
+
     getSlotAnchor(id) {
       const slot = this.slots.get(id);
       if (!slot) {
@@ -2395,16 +2586,28 @@
     }
 
     pickBlockId(clientX, clientY, camera, canvas) {
-      const firstHit = this.pickInventoryHit(clientX, clientY, camera, canvas);
-      if (!firstHit) {
-        return null;
-      }
-      const hits = [firstHit];
+      const rect = canvas.getBoundingClientRect();
+      this.pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      this.pointerNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+
+      this.pointerRaycaster.setFromCamera(this.pointerNdc, camera);
+      const hits = this.pointerRaycaster.intersectObjects(this.interactiveMeshes, false);
       for (const hit of hits) {
         let obj = hit.object;
         while (obj) {
           if (obj.userData && obj.userData.blockId) {
-            return obj.userData.blockId;
+            const id = obj.userData.blockId;
+            const slot = this.slots.get(id);
+            if (
+              slot
+              && slot.visible
+              && slot.clickPad
+              && slot.clickPad.visible
+              && !slot.clickPad.userData.blocked
+            ) {
+              return id;
+            }
+            break;
           }
           obj = obj.parent;
         }
@@ -2488,6 +2691,7 @@
       this.state = 'idle';
       this.phaseTime = 0;
       this.spawnTimer = 0;
+      this.stickyLane = null;
       this.idleTime = Math.random() * Math.PI * 2;
       this.idleSeed = Math.random() * Math.PI * 2;
       this.idleRotationY = Math.random() * Math.PI * 2;
@@ -2497,7 +2701,11 @@
       this.dispatchDuration = 8.1;
       this.currentDispatchDuration = this.dispatchDuration;
       this.returnDuration = 0.68;
-      this.spawnInterval = 0.46;
+      // Base cadence is tuned for speed ~= 10 and then auto-scales with cart speed.
+      this.spawnInterval = 0.2;
+      this.minSpawnInterval = 0.04;
+      this.maxSpawnInterval = 0.34;
+      this.activeSpawnInterval = this.spawnInterval;
 
       this.uiAnchor = new THREE.Vector3();
       this.launchFrom = new THREE.Vector3();
@@ -2505,10 +2713,15 @@
 
       this.projectiles = [];
       this.impactBursts = [];
+      this.unavailableFlashDuration = 1;
+      this.unavailableFlashTime = 0;
+      this.unavailableFlashPhase = Math.random() * Math.PI * 2;
+      this.unavailableTintBindings = [];
 
       this.mesh = this.createCarrierMesh();
       this.mesh.castShadow = true;
       this.mesh.receiveShadow = true;
+      this.refreshUnavailableTintBindings();
 
       this.countCanvas = document.createElement('canvas');
       this.countCanvas.width = 256;
@@ -2556,6 +2769,7 @@
       this.mesh = nextMesh;
       this.scene.add(nextMesh);
       this.scene.remove(oldMesh);
+      this.refreshUnavailableTintBindings();
       if (this.onReplaceMesh) {
         this.onReplaceMesh(oldMesh, nextMesh);
       }
@@ -2619,6 +2833,21 @@
         && this.buildManager.hasPlaceableSlotForType(this.id);
     }
 
+    shouldShowUnavailableFeedback() {
+      return this.state === 'idle'
+        && this.count > 0
+        && !this.minecart.isMoving()
+        && !this.buildManager.hasPlaceableSlotForType(this.id);
+    }
+
+    triggerUnavailableFeedback() {
+      if (!this.shouldShowUnavailableFeedback()) {
+        return false;
+      }
+      this.unavailableFlashTime = this.unavailableFlashDuration;
+      return true;
+    }
+
     getCount() {
       return this.count;
     }
@@ -2641,16 +2870,55 @@
         return false;
       }
 
+      this.unavailableFlashTime = 0;
+      this.applyUnavailableTint(0);
       this.state = 'launching';
       this.phaseTime = 0;
       this.spawnTimer = 0;
+      this.activeSpawnInterval = this.spawnInterval;
+      this.stickyLane = null;
 
       this.launchFrom.copy(this.mesh.position);
 
       return true;
     }
 
+    getSideKeyAtPosition(position) {
+      if (!position || !this.buildManager || !this.buildManager.center) {
+        return null;
+      }
+      const dx = position.x - this.buildManager.center.x;
+      const dz = position.z - this.buildManager.center.z;
+      if (Math.abs(dx) >= Math.abs(dz)) {
+        return dx >= 0 ? 'x+' : 'x-';
+      }
+      return dz >= 0 ? 'z+' : 'z-';
+    }
+
+    createLaneLock(sideKey, targetPosition) {
+      if (!sideKey || !targetPosition) {
+        return null;
+      }
+      if (sideKey === 'x+' || sideKey === 'x-') {
+        return { sideKey, axis: 'z', value: targetPosition.z };
+      }
+      return { sideKey, axis: 'x', value: targetPosition.x };
+    }
+
+    computeCycleSpawnInterval(dispatchDuration) {
+      const duration = Number.isFinite(dispatchDuration) ? dispatchDuration : this.dispatchDuration;
+      if (!Number.isFinite(duration) || duration <= 0) {
+        return this.spawnInterval;
+      }
+      const speed = Math.max(0.001, this.minecart.getSpeed());
+      // Keep near-opposite coverage dense enough at high speeds.
+      const travelPerShot = this.buildManager.cellSize * 1.25;
+      const speedInterval = travelPerShot / speed;
+      return THREE.MathUtils.clamp(speedInterval, this.minSpawnInterval, this.maxSpawnInterval);
+    }
+
     update(dt) {
+      this.updateUnavailableFeedback(dt);
       this.updateProjectiles(dt);
       this.updateImpactBursts(dt);
 
@@ -2685,6 +2953,7 @@
 
       if (progress >= 1) {
         this.currentDispatchDuration = this.minecart.startSingleLap();
+        this.activeSpawnInterval = this.computeCycleSpawnInterval(this.currentDispatchDuration);
         this.state = 'dispatching';
         this.phaseTime = 0;
         this.spawnTimer = 0;
@@ -2693,32 +2962,36 @@
 
     updateDispatching(dt) {
       this.phaseTime += dt;
-      if (this.count <= 0 || !this.buildManager.hasPlaceableSlotForType(this.id)) {
-        this.phaseTime = this.dispatchDuration;
-      }
 
       const cargoPos = this.minecart.getCargoAnchor(TEMP_A);
       const cargoForward = this.minecart.getForward(TEMP_B);
       this.mesh.position.copy(cargoPos);
       this.mesh.rotation.set(0, 0, 0);
 
-      this.spawnTimer += dt;
-      while (this.spawnTimer >= this.spawnInterval) {
-        this.spawnTimer -= this.spawnInterval;
-        const spawnResult = this.spawnPiece(cargoPos, cargoForward);
-        if (spawnResult === 'finished' || spawnResult === 'depleted') {
-          this.spawnTimer = 0;
-          this.phaseTime = this.dispatchDuration;
-          break;
-        }
-        if (spawnResult === 'waiting-side') {
-          // Retry quickly while the cart moves so we don't miss short side windows.
-          this.spawnTimer = this.spawnInterval;
-          break;
+      if (this.count > 0 && this.buildManager.hasPlaceableSlotForType(this.id)) {
+        const interval = Math.max(this.minSpawnInterval, this.activeSpawnInterval || this.spawnInterval);
+        this.spawnTimer += dt;
+        if (this.spawnTimer >= interval) {
+          this.spawnTimer -= interval;
+          const spawnResult = this.spawnPiece(cargoPos, cargoForward);
+          if (spawnResult === 'finished' || spawnResult === 'depleted') {
+            this.spawnTimer = 0;
+          } else if (spawnResult === 'waiting-side') {
+            this.spawnTimer = Math.min(this.spawnTimer, interval * 0.5);
+          }
         }
       }
 
       if (this.phaseTime >= this.currentDispatchDuration || !this.minecart.isMoving()) {
+        const hasMoreWork = this.count > 0 && this.buildManager.hasPlaceableSlotForType(this.id);
+        if (hasMoreWork) {
+          this.currentDispatchDuration = this.minecart.startSingleLap();
+          this.activeSpawnInterval = this.computeCycleSpawnInterval(this.currentDispatchDuration);
+          this.phaseTime = 0;
+          this.spawnTimer = 0;
+          return;
+        }
+
         this.state = 'returning';
         this.phaseTime = 0;
         this.returnFrom.copy(this.mesh.position);
@@ -2756,8 +3029,61 @@
       const bob = 0.5 + Math.sin(this.idleTime * 2.1 + this.idleSeed) * 0.1;
       this.mesh.position.copy(this.uiAnchor);
       this.mesh.position.y += bob;
+      if (this.unavailableFlashTime > 0) {
+        const progress = Math.max(0, Math.min(1, this.unavailableFlashTime / this.unavailableFlashDuration));
+        const shakeAmp = 0.11 * progress;
+        const shakeX = Math.sin((this.idleTime * 48) + this.unavailableFlashPhase) * shakeAmp;
+        const shakeZ = Math.cos((this.idleTime * 44) + this.unavailableFlashPhase * 0.7) * shakeAmp;
+        this.mesh.position.x += shakeX;
+        this.mesh.position.z += shakeZ;
+      }
       this.mesh.rotation.y = this.idleRotationY + this.idleYawOffsetRad;
       this.mesh.rotation.x = Math.sin(this.idleTime * 1.25 + this.idleSeed) * 0.05;
+    }
+
+    updateUnavailableFeedback(dt) {
+      if (this.unavailableFlashTime <= 0) {
+        this.applyUnavailableTint(0);
+        return;
+      }
+      this.unavailableFlashTime = Math.max(0, this.unavailableFlashTime - dt);
+      const progress = Math.max(0, Math.min(1, this.unavailableFlashTime / this.unavailableFlashDuration));
+      const pulse = 0.55 + 0.45 * Math.abs(Math.sin((1 - progress) * Math.PI * 8));
+      this.applyUnavailableTint(progress * pulse);
+    }
+
+    refreshUnavailableTintBindings() {
+      this.unavailableTintBindings = [];
+      this.mesh.traverse((node) => {
+        if (!node || !node.material) {
+          return;
+        }
+        const materials = Array.isArray(node.material) ? node.material : [node.material];
+        for (const material of materials) {
+          if (!material || !material.emissive || typeof material.emissive.clone !== 'function') {
+            continue;
+          }
+          this.unavailableTintBindings.push({
+            material,
+            baseEmissive: material.emissive.clone(),
+            baseEmissiveIntensity: Number.isFinite(material.emissiveIntensity) ? material.emissiveIntensity : 1,
+          });
+        }
+      });
+    }
+
+    applyUnavailableTint(strength) {
+      if (!this.unavailableTintBindings || this.unavailableTintBindings.length === 0) {
+        return;
+      }
+      const s = Math.max(0, Math.min(1, strength));
+      for (const entry of this.unavailableTintBindings) {
+        const material = entry.material;
+        material.emissive.copy(entry.baseEmissive).lerp(UNAVAILABLE_FLASH_COLOR, s * 0.92);
+        if (Number.isFinite(entry.baseEmissiveIntensity)) {
+          material.emissiveIntensity = entry.baseEmissiveIntensity + s * 0.7;
+        }
+      }
     }
 
     spawnPiece(origin, forward) {
@@ -2769,9 +3095,33 @@
         return 'finished';
       }
 
-      const reserved = this.buildManager.reserveNext(this.id, origin || this.mesh.position, forward || null);
+      const spawnOrigin = origin || this.mesh.position;
+      const sideKey = this.getSideKeyAtPosition(spawnOrigin);
+      if (this.stickyLane && sideKey && this.stickyLane.sideKey !== sideKey) {
+        this.stickyLane = null;
+      }
+
+      let reserved = this.buildManager.reserveNext(
+        this.id,
+        spawnOrigin,
+        forward || null,
+        this.stickyLane,
+      );
+      if (!reserved && this.stickyLane) {
+        // Current lane is done or unavailable; unlock and pick a new lane.
+        this.stickyLane = null;
+        reserved = this.buildManager.reserveNext(
+          this.id,
+          spawnOrigin,
+          forward || null,
+          null,
+        );
+      }
       if (!reserved) {
         return 'waiting-side';
+      }
+      if (!this.stickyLane) {
+        this.stickyLane = this.createLaneLock(sideKey, reserved.position);
       }
 
       this.count -= 1;
@@ -3794,9 +4144,14 @@
 
     exportJSON() {
       const blocks = Array.from(this.cells.values())
-        .filter((entry) => !this.isWaterEntry(entry) || this.isWaterSourceEntry(entry))
-        .map(({ type, textureKey, rotYDeg, x, y, z }) => {
+        .map((entry) => {
+          const {
+            type, textureKey, rotYDeg, x, y, z,
+          } = entry;
           const block = { type, x, y, z };
+          if (this.isWaterEntry(entry) && entry.waterSource === false) {
+            block.waterSource = false;
+          }
           if (textureKey && textureKey !== EDITOR_TEXTURE_MODE_AUTO) {
             block.texture = textureKey;
           }
@@ -4902,6 +5257,125 @@
   ensureDoorShowcaseNearMinecart(scene, minecart);
 
   let activeBlockId = null;
+  const FRONT_SLOT_COUNT = 3;
+  const FRONT_SLOT_SPACING = 2.55;
+  const FRONT_SLOT_Z = -9.8;
+  const BACK_COLS = 3;
+  const BACK_COL_SPACING = 2.35;
+  const BACK_ROW_SPACING = 2.35;
+  const BACK_START_Z = FRONT_SLOT_Z - 2.35;
+  const inventoryFrontSlots = new Array(FRONT_SLOT_COUNT).fill(null);
+  let inventoryBackOrder = [];
+  let pendingBackToFrontId = null;
+  let pendingBackToFrontSlot = -1;
+
+  function getInventoryZone(id) {
+    if (inventoryFrontSlots.includes(id)) {
+      return 'front';
+    }
+    if (inventoryBackOrder.includes(id)) {
+      return 'back';
+    }
+    return 'hidden';
+  }
+
+  function getFirstFreeFrontSlotIndex() {
+    for (let i = 0; i < inventoryFrontSlots.length; i += 1) {
+      if (!inventoryFrontSlots[i]) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  function removeIdFromInventoryZones(id) {
+    for (let i = 0; i < inventoryFrontSlots.length; i += 1) {
+      if (inventoryFrontSlots[i] === id) {
+        inventoryFrontSlots[i] = null;
+      }
+    }
+    inventoryBackOrder = inventoryBackOrder.filter((value) => value !== id);
+  }
+
+  function applyInventoryQueueLayout() {
+    const layoutItems = [];
+    const frontCenter = (FRONT_SLOT_COUNT - 1) * 0.5;
+    for (let i = 0; i < FRONT_SLOT_COUNT; i += 1) {
+      const id = inventoryFrontSlots[i];
+      if (!id) {
+        continue;
+      }
+      layoutItems.push({
+        id,
+        x: (i - frontCenter) * FRONT_SLOT_SPACING,
+        z: FRONT_SLOT_Z,
+        visible: true,
+      });
+    }
+
+    for (let index = 0; index < inventoryBackOrder.length; index += 1) {
+      const id = inventoryBackOrder[index];
+      const row = Math.floor(index / BACK_COLS);
+      const col = index % BACK_COLS;
+      const colCenter = (BACK_COLS - 1) * 0.5;
+      layoutItems.push({
+        id,
+        x: (col - colCenter) * BACK_COL_SPACING,
+        z: BACK_START_Z - (row * BACK_ROW_SPACING),
+        visible: true,
+      });
+    }
+
+    worldInventory.setQueueLayout(layoutItems);
+    syncInventoryAnchors();
+  }
+
+  function syncInventoryQueueState(activeIdsOrdered) {
+    const activeIds = Array.isArray(activeIdsOrdered) ? activeIdsOrdered.slice() : [];
+    const activeSet = new Set(activeIds);
+
+    const seenFront = new Set();
+    for (let i = 0; i < inventoryFrontSlots.length; i += 1) {
+      const id = inventoryFrontSlots[i];
+      const controller = id ? blocks.get(id) : null;
+      const isValid = Boolean(
+        id
+          && !seenFront.has(id)
+          && activeSet.has(id)
+          && controller
+          && controller.getCount() > 0,
+      );
+      if (!isValid) {
+        inventoryFrontSlots[i] = null;
+      } else {
+        seenFront.add(id);
+      }
+    }
+
+    inventoryBackOrder = inventoryBackOrder.filter((id) => (
+      !seenFront.has(id)
+      && activeSet.has(id)
+      && blocks.has(id)
+      && blocks.get(id).getCount() > 0
+    ));
+
+    const inBack = new Set(inventoryBackOrder);
+    for (const id of activeIds) {
+      if (pendingBackToFrontId && id === pendingBackToFrontId) {
+        continue;
+      }
+      if (seenFront.has(id) || inBack.has(id)) {
+        continue;
+      }
+      inventoryBackOrder.push(id);
+      inBack.add(id);
+    }
+
+    if (pendingBackToFrontId && !activeSet.has(pendingBackToFrontId)) {
+      pendingBackToFrontId = null;
+      pendingBackToFrontSlot = -1;
+    }
+  }
 
   function handleSlotClick(id) {
     if (editor.isEnabled()) {
@@ -4913,13 +5387,37 @@
     }
 
     const controller = blocks.get(id);
-    if (!controller || !controller.canStartCycle()) {
+    if (!controller) {
+      return;
+    }
+
+    const zone = getInventoryZone(id);
+    if (zone !== 'front' && zone !== 'back') {
+      controller.triggerUnavailableFeedback();
+      return;
+    }
+    if (zone === 'back' && getFirstFreeFrontSlotIndex() < 0) {
+      controller.triggerUnavailableFeedback();
+      return;
+    }
+    if (!controller.canStartCycle()) {
+      controller.triggerUnavailableFeedback();
       return;
     }
 
     const started = controller.startCycle();
     if (!started) {
       return;
+    }
+
+    if (zone === 'back') {
+      const freeFrontSlot = getFirstFreeFrontSlotIndex();
+      if (freeFrontSlot >= 0) {
+        inventoryBackOrder = inventoryBackOrder.filter((value) => value !== id);
+        pendingBackToFrontId = id;
+        pendingBackToFrontSlot = freeFrontSlot;
+        applyInventoryQueueLayout();
+      }
     }
 
     activeBlockId = id;
@@ -4934,6 +5432,15 @@
     if (activeBlockId === id) {
       activeBlockId = null;
     }
+    if (pendingBackToFrontId === id && pendingBackToFrontSlot >= 0) {
+      const slotIndex = pendingBackToFrontSlot;
+      if (slotIndex < inventoryFrontSlots.length && !inventoryFrontSlots[slotIndex]) {
+        inventoryFrontSlots[slotIndex] = id;
+      }
+      pendingBackToFrontId = null;
+      pendingBackToFrontSlot = -1;
+    }
+    applyInventoryQueueLayout();
     refreshUiLockState();
   }
 
@@ -4996,10 +5503,17 @@
   );
   syncInventoryAnchors();
   applyInventorySpinAngle();
+  let lastBuiltCount = buildManager.getBuiltCount();
 
   function syncBlockCountsFromLevel() {
+    const activeQueue = buildManager.getCurrentLayerQueue();
     const statsByType = buildManager.getSlotInventoryStats();
-    const visibleIds = [];
+    const activeIdsOrdered = activeQueue
+      .map((entry) => entry.id)
+      .filter((id) => {
+        const stat = statsByType[id];
+        return Boolean(stat) && stat.count > 0;
+      });
     for (const controller of blocks.values()) {
       const stat = statsByType[controller.id] || null;
       const count = stat ? stat.count : 0;
@@ -5007,19 +5521,25 @@
         controller.setAppearance(stat.type || controller.type, stat.textureKey);
       }
       controller.setCount(count);
-      if (count > 0) {
-        visibleIds.push(controller.id);
+      if (count <= 0) {
+        removeIdFromInventoryZones(controller.id);
       }
     }
-    worldInventory.setVisibleSlots(visibleIds);
-    syncInventoryAnchors();
+    syncInventoryQueueState(activeIdsOrdered);
+    applyInventoryQueueLayout();
+    lastBuiltCount = buildManager.getBuiltCount();
   }
 
   function refreshUiLockState() {
     worldInventory.setCycleLock(activeBlockId);
+    const frontIsFull = getFirstFreeFrontSlotIndex() < 0;
 
     for (const [id, controller] of blocks.entries()) {
-      const disabled = controller.getCount() <= 0 || (activeBlockId !== null && activeBlockId !== id);
+      const zone = getInventoryZone(id);
+      const disabled = controller.getCount() <= 0
+        || zone === 'hidden'
+        || (zone === 'back' && frontIsFull)
+        || (activeBlockId !== null && activeBlockId !== id);
       worldInventory.setDisabled(id, disabled);
       worldInventory.setCount(id, controller.getCount());
     }
@@ -5820,6 +6340,12 @@
     ensureDoorShowcaseNearMinecart(scene, minecart);
     for (const controller of blocks.values()) {
       controller.update(dt);
+    }
+    const builtCountNow = buildManager.getBuiltCount();
+    if (builtCountNow !== lastBuiltCount) {
+      lastBuiltCount = builtCountNow;
+      syncBlockCountsFromLevel();
+      refreshUiLockState();
     }
 
     renderer.render(scene, camera);

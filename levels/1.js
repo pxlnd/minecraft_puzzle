@@ -106,10 +106,24 @@
     },
     {
       "type": "water",
+      "x": -1,
+      "y": 0,
+      "z": -1,
+      "waterSource": false
+    },
+    {
+      "type": "water",
       "x": 0,
       "y": 0,
       "z": -1,
       "texture": "stonebrick"
+    },
+    {
+      "type": "water",
+      "x": 1,
+      "y": 0,
+      "z": -1,
+      "waterSource": false
     },
     {
       "type": "water",
@@ -194,10 +208,24 @@
     },
     {
       "type": "water",
+      "x": -1,
+      "y": 0,
+      "z": 1,
+      "waterSource": false
+    },
+    {
+      "type": "water",
       "x": 0,
       "y": 0,
       "z": 1,
       "texture": "stonebrick"
+    },
+    {
+      "type": "water",
+      "x": 1,
+      "y": 0,
+      "z": 1,
+      "waterSource": false
     },
     {
       "type": "water",
@@ -320,11 +348,39 @@
       "texture": "stonebrick"
     },
     {
+      "type": "water",
+      "x": -1,
+      "y": 1,
+      "z": -1,
+      "waterSource": false
+    },
+    {
+      "type": "water",
+      "x": 1,
+      "y": 1,
+      "z": -1,
+      "waterSource": false
+    },
+    {
       "type": "stone",
       "x": 0,
       "y": 1,
       "z": 0,
       "texture": "stonebrick"
+    },
+    {
+      "type": "water",
+      "x": -1,
+      "y": 1,
+      "z": 1,
+      "waterSource": false
+    },
+    {
+      "type": "water",
+      "x": 1,
+      "y": 1,
+      "z": 1,
+      "waterSource": false
     },
     {
       "type": "wood_pillar",
@@ -339,6 +395,20 @@
       "y": 1,
       "z": 2,
       "texture": "stonebrick"
+    },
+    {
+      "type": "water",
+      "x": -1,
+      "y": 2,
+      "z": -1,
+      "waterSource": false
+    },
+    {
+      "type": "water",
+      "x": 1,
+      "y": 2,
+      "z": -1,
+      "waterSource": false
     },
     {
       "type": "stone",
@@ -348,12 +418,40 @@
       "texture": "stonebrick"
     },
     {
+      "type": "water",
+      "x": -1,
+      "y": 2,
+      "z": 1,
+      "waterSource": false
+    },
+    {
+      "type": "water",
+      "x": 1,
+      "y": 2,
+      "z": 1,
+      "waterSource": false
+    },
+    {
+      "type": "water",
+      "x": -1,
+      "y": 3,
+      "z": -1,
+      "waterSource": false
+    },
+    {
       "type": "stone_slab",
       "x": 0,
       "y": 3,
       "z": -1,
       "texture": "stonebrick",
       "rotYDeg": 270
+    },
+    {
+      "type": "water",
+      "x": 1,
+      "y": 3,
+      "z": -1,
+      "waterSource": false
     },
     {
       "type": "stone_slab",
@@ -378,12 +476,26 @@
       "rotYDeg": 270
     },
     {
+      "type": "water",
+      "x": -1,
+      "y": 3,
+      "z": 1,
+      "waterSource": false
+    },
+    {
       "type": "stone_slab",
       "x": 0,
       "y": 3,
       "z": 1,
       "texture": "stonebrick",
       "rotYDeg": 270
+    },
+    {
+      "type": "water",
+      "x": 1,
+      "y": 3,
+      "z": 1,
+      "waterSource": false
     },
     {
       "type": "stone_slab",
@@ -450,12 +562,40 @@
       "rotYDeg": 180
     },
     {
+      "type": "water",
+      "x": -1,
+      "y": 4,
+      "z": -1,
+      "waterSource": false
+    },
+    {
+      "type": "water",
+      "x": 0,
+      "y": 4,
+      "z": -1,
+      "waterSource": false
+    },
+    {
+      "type": "water",
+      "x": 1,
+      "y": 4,
+      "z": -1,
+      "waterSource": false
+    },
+    {
       "type": "stone_stairs",
       "x": -2,
       "y": 4,
       "z": 0,
       "texture": "stonebrick",
       "rotYDeg": 270
+    },
+    {
+      "type": "water",
+      "x": -1,
+      "y": 4,
+      "z": 0,
+      "waterSource": false
     },
     {
       "type": "stone",
@@ -465,12 +605,40 @@
       "texture": "stonebrick"
     },
     {
+      "type": "water",
+      "x": 1,
+      "y": 4,
+      "z": 0,
+      "waterSource": false
+    },
+    {
       "type": "stone_stairs",
       "x": 2,
       "y": 4,
       "z": 0,
       "texture": "stonebrick",
       "rotYDeg": 90
+    },
+    {
+      "type": "water",
+      "x": -1,
+      "y": 4,
+      "z": 1,
+      "waterSource": false
+    },
+    {
+      "type": "water",
+      "x": 0,
+      "y": 4,
+      "z": 1,
+      "waterSource": false
+    },
+    {
+      "type": "water",
+      "x": 1,
+      "y": 4,
+      "z": 1,
+      "waterSource": false
     },
     {
       "type": "stone_stairs",
@@ -483,8 +651,36 @@
       "type": "water",
       "x": 0,
       "y": 5,
+      "z": -1,
+      "waterSource": false
+    },
+    {
+      "type": "water",
+      "x": -1,
+      "y": 5,
+      "z": 0,
+      "waterSource": false
+    },
+    {
+      "type": "water",
+      "x": 0,
+      "y": 5,
       "z": 0,
       "texture": "stonebrick"
+    },
+    {
+      "type": "water",
+      "x": 1,
+      "y": 5,
+      "z": 0,
+      "waterSource": false
+    },
+    {
+      "type": "water",
+      "x": 0,
+      "y": 5,
+      "z": 1,
+      "waterSource": false
     },
     {
       "type": "wood_pillar",
@@ -497,254 +693,254 @@
   "rails": [
     {
       "type": "corner",
-      "x": -6,
-      "z": -4,
+      "x": -5,
+      "z": -5,
       "yaw": 3.141592653589793
     },
     {
       "type": "straight",
-      "x": -5,
-      "z": -4,
-      "yaw": 1.5707963267948966
-    },
-    {
-      "type": "straight",
       "x": -4,
-      "z": -4,
+      "z": -5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": -3,
-      "z": -4,
+      "z": -5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": -2,
-      "z": -4,
+      "z": -5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": -1,
-      "z": -4,
+      "z": -5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": 0,
-      "z": -4,
+      "z": -5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": 1,
-      "z": -4,
+      "z": -5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": 2,
-      "z": -4,
+      "z": -5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": 3,
-      "z": -4,
+      "z": -5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": 4,
-      "z": -4,
+      "z": -5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": 5,
-      "z": -4,
+      "z": -5,
       "yaw": 1.5707963267948966
+    },
+    {
+      "type": "corner",
+      "x": 6,
+      "z": -5,
+      "yaw": 1.5707963267948966
+    },
+    {
+      "type": "straight",
+      "x": -5,
+      "z": -4,
+      "yaw": 0
     },
     {
       "type": "straight",
       "x": 6,
       "z": -4,
-      "yaw": 1.5707963267948966
-    },
-    {
-      "type": "corner",
-      "x": 7,
-      "z": -4,
-      "yaw": 1.5707963267948966
+      "yaw": 0
     },
     {
       "type": "straight",
-      "x": -6,
+      "x": -5,
       "z": -3,
       "yaw": 0
     },
     {
       "type": "straight",
-      "x": 7,
+      "x": 6,
       "z": -3,
       "yaw": 0
     },
     {
       "type": "straight",
-      "x": -6,
+      "x": -5,
       "z": -2,
       "yaw": 0
     },
     {
       "type": "straight",
-      "x": 7,
+      "x": 6,
       "z": -2,
       "yaw": 0
     },
     {
       "type": "straight",
-      "x": -6,
+      "x": -5,
       "z": -1,
       "yaw": 0
     },
     {
       "type": "straight",
-      "x": 7,
+      "x": 6,
       "z": -1,
       "yaw": 0
     },
     {
       "type": "straight",
-      "x": -6,
+      "x": -5,
       "z": 0,
       "yaw": 0
     },
     {
       "type": "straight",
-      "x": 7,
+      "x": 6,
       "z": 0,
       "yaw": 0
     },
     {
       "type": "straight",
-      "x": -6,
+      "x": -5,
       "z": 1,
       "yaw": 0
     },
     {
       "type": "straight",
-      "x": 7,
+      "x": 6,
       "z": 1,
       "yaw": 0
     },
     {
       "type": "straight",
-      "x": -6,
+      "x": -5,
       "z": 2,
       "yaw": 0
     },
     {
       "type": "straight",
-      "x": 7,
+      "x": 6,
       "z": 2,
       "yaw": 0
     },
     {
       "type": "straight",
-      "x": -6,
+      "x": -5,
       "z": 3,
       "yaw": 0
     },
     {
       "type": "straight",
-      "x": 7,
+      "x": 6,
       "z": 3,
       "yaw": 0
     },
     {
-      "type": "corner",
-      "x": -6,
+      "type": "straight",
+      "x": -5,
       "z": 4,
+      "yaw": 0
+    },
+    {
+      "type": "straight",
+      "x": 6,
+      "z": 4,
+      "yaw": 0
+    },
+    {
+      "type": "corner",
+      "x": -5,
+      "z": 5,
       "yaw": 4.71238898038469
     },
     {
       "type": "straight",
-      "x": -5,
-      "z": 4,
-      "yaw": 1.5707963267948966
-    },
-    {
-      "type": "straight",
       "x": -4,
-      "z": 4,
+      "z": 5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": -3,
-      "z": 4,
+      "z": 5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": -2,
-      "z": 4,
+      "z": 5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": -1,
-      "z": 4,
+      "z": 5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": 0,
-      "z": 4,
+      "z": 5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": 1,
-      "z": 4,
+      "z": 5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": 2,
-      "z": 4,
+      "z": 5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": 3,
-      "z": 4,
+      "z": 5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": 4,
-      "z": 4,
+      "z": 5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "straight",
       "x": 5,
-      "z": 4,
-      "yaw": 1.5707963267948966
-    },
-    {
-      "type": "straight",
-      "x": 6,
-      "z": 4,
+      "z": 5,
       "yaw": 1.5707963267948966
     },
     {
       "type": "corner",
-      "x": 7,
-      "z": 4,
+      "x": 6,
+      "z": 5,
       "yaw": 0
     }
   ],
