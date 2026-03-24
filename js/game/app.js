@@ -1711,6 +1711,12 @@
     path.absarc(-hw + radius, -hh + radius, radius, Math.PI, Math.PI * 1.5, false);
   }
 
+  function createRoundedRectPadGeometry(width, depth, radius) {
+    const shape = new THREE.Shape();
+    addRoundedRect(shape, width, depth, radius);
+    return new THREE.ShapeGeometry(shape);
+  }
+
   class TrackController {
     constructor(scene) {
       this.scene = scene;
@@ -2407,6 +2413,14 @@
       this.pointerNdc = new THREE.Vector2();
       this.layoutSpacing = 2.55;
       this.layoutBaseZ = -9.8;
+      this.slotPadGeometry = createRoundedRectPadGeometry(2.12, 2.12, 0.36);
+      this.slotPadMaterial = new THREE.MeshStandardMaterial({
+        color: 0x0f0f12,
+        roughness: 0.95,
+        metalness: 0.03,
+        transparent: true,
+        opacity: 0.88,
+      });
 
       const layout = slotConfigs.filter((config) => !config.empty);
       const startX = -((layout.length - 1) * this.layoutSpacing) * 0.5;
@@ -2423,10 +2437,17 @@
         clickPad.userData.blockId = config.id;
         this.group.add(clickPad);
 
+        const visualPad = new THREE.Mesh(this.slotPadGeometry, this.slotPadMaterial.clone());
+        visualPad.rotation.x = -Math.PI * 0.5;
+        visualPad.position.set(slotX, 0.02, this.layoutBaseZ);
+        visualPad.receiveShadow = true;
+        this.group.add(visualPad);
+
         this.interactiveMeshes.push(clickPad);
         this.slots.set(config.id, {
           id: config.id,
           clickPad,
+          visualPad,
           anchor: new THREE.Vector3(slotX, 1.02, this.layoutBaseZ),
           disabled: false,
           locked: false,
@@ -2472,8 +2493,14 @@
         const slotX = startX + i * this.layoutSpacing;
         slot.anchor.set(slotX, 1.02, this.layoutBaseZ);
         slot.clickPad.position.set(slotX, 0.5, this.layoutBaseZ);
+        if (slot.visualPad) {
+          slot.visualPad.position.set(slotX, 0.02, this.layoutBaseZ);
+        }
         slot.visible = true;
         slot.clickPad.visible = true;
+        if (slot.visualPad) {
+          slot.visualPad.visible = true;
+        }
       }
       for (const slot of this.slots.values()) {
         if (ordered.includes(slot)) {
@@ -2481,6 +2508,9 @@
         }
         slot.visible = false;
         slot.clickPad.visible = false;
+        if (slot.visualPad) {
+          slot.visualPad.visible = false;
+        }
       }
       for (const slot of this.slots.values()) {
         this.applySlotState(slot);
@@ -2510,8 +2540,14 @@
         }
         slot.anchor.set(layout.x, 1.02, layout.z);
         slot.clickPad.position.set(layout.x, 0.5, layout.z);
+        if (slot.visualPad) {
+          slot.visualPad.position.set(layout.x, 0.02, layout.z);
+        }
         slot.visible = layout.visible;
         slot.clickPad.visible = layout.visible;
+        if (slot.visualPad) {
+          slot.visualPad.visible = layout.visible;
+        }
       }
 
       for (const slot of this.slots.values()) {
@@ -2573,6 +2609,11 @@
     applySlotState(slot) {
       const blocked = slot.disabled || slot.locked || !slot.visible;
       slot.clickPad.userData.blocked = blocked;
+      if (slot.visualPad && slot.visualPad.material) {
+        const material = slot.visualPad.material;
+        material.opacity = blocked ? 0.56 : 0.9;
+        material.color.setHex(blocked ? 0x0a0a0d : 0x111116);
+      }
     }
 
     pickInventoryHit(clientX, clientY, camera, canvas) {
@@ -4343,8 +4384,8 @@
   const debugEditor = document.getElementById('debug-editor');
   const inventoryMoveEnabledInput = document.getElementById('inventory-move-enabled');
   const DEFAULT_INVENTORY_ZONE = {
-    x: 19.84,
-    z: 0.0,
+    x: 21.24,
+    z: 0.01,
     angleDeg: 90,
   };
   let uiHidden = false;
@@ -5265,15 +5306,17 @@
   const BACK_ROW_SPACING = 2.35;
   const BACK_START_Z = FRONT_SLOT_Z - 2.35;
   const inventoryFrontSlots = new Array(FRONT_SLOT_COUNT).fill(null);
-  let inventoryBackOrder = [];
+  let inventoryBackSlots = [];
   let pendingBackToFrontId = null;
   let pendingBackToFrontSlot = -1;
+  let pendingClickBlockId = null;
+  let pendingQueueLayoutRefresh = false;
 
   function getInventoryZone(id) {
     if (inventoryFrontSlots.includes(id)) {
       return 'front';
     }
-    if (inventoryBackOrder.includes(id)) {
+    if (inventoryBackSlots.includes(id)) {
       return 'back';
     }
     return 'hidden';
@@ -5288,13 +5331,40 @@
     return -1;
   }
 
+  function findBackSlotIndexById(id) {
+    for (let i = 0; i < inventoryBackSlots.length; i += 1) {
+      if (inventoryBackSlots[i] === id) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  function allocateBackSlotForId(id) {
+    const existingIndex = findBackSlotIndexById(id);
+    if (existingIndex >= 0) {
+      return existingIndex;
+    }
+    for (let i = 0; i < inventoryBackSlots.length; i += 1) {
+      if (!inventoryBackSlots[i]) {
+        inventoryBackSlots[i] = id;
+        return i;
+      }
+    }
+    inventoryBackSlots.push(id);
+    return inventoryBackSlots.length - 1;
+  }
+
   function removeIdFromInventoryZones(id) {
     for (let i = 0; i < inventoryFrontSlots.length; i += 1) {
       if (inventoryFrontSlots[i] === id) {
         inventoryFrontSlots[i] = null;
       }
     }
-    inventoryBackOrder = inventoryBackOrder.filter((value) => value !== id);
+    const backIndex = findBackSlotIndexById(id);
+    if (backIndex >= 0) {
+      inventoryBackSlots[backIndex] = null;
+    }
   }
 
   function applyInventoryQueueLayout() {
@@ -5313,8 +5383,11 @@
       });
     }
 
-    for (let index = 0; index < inventoryBackOrder.length; index += 1) {
-      const id = inventoryBackOrder[index];
+    for (let index = 0; index < inventoryBackSlots.length; index += 1) {
+      const id = inventoryBackSlots[index];
+      if (!id) {
+        continue;
+      }
       const row = Math.floor(index / BACK_COLS);
       const col = index % BACK_COLS;
       const colCenter = (BACK_COLS - 1) * 0.5;
@@ -5352,23 +5425,30 @@
       }
     }
 
-    inventoryBackOrder = inventoryBackOrder.filter((id) => (
-      !seenFront.has(id)
-      && activeSet.has(id)
-      && blocks.has(id)
-      && blocks.get(id).getCount() > 0
-    ));
+    for (let i = 0; i < inventoryBackSlots.length; i += 1) {
+      const id = inventoryBackSlots[i];
+      if (!id) {
+        continue;
+      }
+      const isValid = (
+        !seenFront.has(id)
+        && activeSet.has(id)
+        && blocks.has(id)
+        && blocks.get(id).getCount() > 0
+      );
+      if (!isValid) {
+        inventoryBackSlots[i] = null;
+      }
+    }
 
-    const inBack = new Set(inventoryBackOrder);
     for (const id of activeIds) {
       if (pendingBackToFrontId && id === pendingBackToFrontId) {
         continue;
       }
-      if (seenFront.has(id) || inBack.has(id)) {
+      if (seenFront.has(id) || findBackSlotIndexById(id) >= 0) {
         continue;
       }
-      inventoryBackOrder.push(id);
-      inBack.add(id);
+      allocateBackSlotForId(id);
     }
 
     if (pendingBackToFrontId && !activeSet.has(pendingBackToFrontId)) {
@@ -5379,10 +5459,6 @@
 
   function handleSlotClick(id) {
     if (editor.isEnabled()) {
-      return;
-    }
-
-    if (activeBlockId !== null) {
       return;
     }
 
@@ -5400,6 +5476,10 @@
       controller.triggerUnavailableFeedback();
       return;
     }
+    if (activeBlockId !== null || minecart.isMoving()) {
+      pendingClickBlockId = id;
+      return;
+    }
     if (!controller.canStartCycle()) {
       controller.triggerUnavailableFeedback();
       return;
@@ -5413,14 +5493,13 @@
     if (zone === 'back') {
       const freeFrontSlot = getFirstFreeFrontSlotIndex();
       if (freeFrontSlot >= 0) {
-        inventoryBackOrder = inventoryBackOrder.filter((value) => value !== id);
         pendingBackToFrontId = id;
         pendingBackToFrontSlot = freeFrontSlot;
-        applyInventoryQueueLayout();
       }
     }
 
     activeBlockId = id;
+    pendingClickBlockId = null;
     refreshUiLockState();
   }
 
@@ -5434,14 +5513,26 @@
     }
     if (pendingBackToFrontId === id && pendingBackToFrontSlot >= 0) {
       const slotIndex = pendingBackToFrontSlot;
+      const backIndex = findBackSlotIndexById(id);
+      if (backIndex >= 0) {
+        inventoryBackSlots[backIndex] = null;
+      }
       if (slotIndex < inventoryFrontSlots.length && !inventoryFrontSlots[slotIndex]) {
         inventoryFrontSlots[slotIndex] = id;
       }
       pendingBackToFrontId = null;
       pendingBackToFrontSlot = -1;
     }
+    if (pendingQueueLayoutRefresh) {
+      pendingQueueLayoutRefresh = false;
+    }
     applyInventoryQueueLayout();
     refreshUiLockState();
+    if (pendingClickBlockId) {
+      const queuedId = pendingClickBlockId;
+      pendingClickBlockId = null;
+      handleSlotClick(queuedId);
+    }
   }
 
   function getLevelCountsByType() {
@@ -5526,7 +5617,12 @@
       }
     }
     syncInventoryQueueState(activeIdsOrdered);
-    applyInventoryQueueLayout();
+    if (activeBlockId !== null || minecart.isMoving()) {
+      pendingQueueLayoutRefresh = true;
+    } else {
+      pendingQueueLayoutRefresh = false;
+      applyInventoryQueueLayout();
+    }
     lastBuiltCount = buildManager.getBuiltCount();
   }
 
@@ -5543,6 +5639,18 @@
       worldInventory.setDisabled(id, disabled);
       worldInventory.setCount(id, controller.getCount());
     }
+  }
+
+  function flushPendingClick() {
+    if (!pendingClickBlockId || editor.isEnabled()) {
+      return;
+    }
+    if (activeBlockId !== null || minecart.isMoving()) {
+      return;
+    }
+    const queuedId = pendingClickBlockId;
+    pendingClickBlockId = null;
+    handleSlotClick(queuedId);
   }
 
   function refreshDoorCarrierMeshes() {
@@ -6347,6 +6455,12 @@
       syncBlockCountsFromLevel();
       refreshUiLockState();
     }
+    if (pendingQueueLayoutRefresh && activeBlockId === null && !minecart.isMoving()) {
+      pendingQueueLayoutRefresh = false;
+      applyInventoryQueueLayout();
+      refreshUiLockState();
+    }
+    flushPendingClick();
 
     renderer.render(scene, camera);
   }
