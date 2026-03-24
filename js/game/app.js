@@ -2413,13 +2413,24 @@
       this.pointerNdc = new THREE.Vector2();
       this.layoutSpacing = 2.55;
       this.layoutBaseZ = -9.8;
+      this.cooldownActive = false;
+      this.cooldownProgress = 0;
+      this.cooldownActiveId = null;
       this.slotPadGeometry = createRoundedRectPadGeometry(2.12, 2.12, 0.36);
       this.slotPadMaterial = new THREE.MeshStandardMaterial({
-        color: 0x0f0f12,
-        roughness: 0.95,
-        metalness: 0.03,
+        color: 0xffffff,
+        roughness: 0.9,
+        metalness: 0.02,
         transparent: true,
-        opacity: 0.88,
+        opacity: 0.3,
+      });
+      this.cooldownBarGeometry = new THREE.PlaneGeometry(1.36, 0.2);
+      this.cooldownBarBaseMaterial = new THREE.MeshBasicMaterial({
+        color: 0x84ff7a,
+        transparent: true,
+        opacity: 0.62,
+        depthWrite: false,
+        side: THREE.DoubleSide,
       });
 
       const layout = slotConfigs.filter((config) => !config.empty);
@@ -2443,11 +2454,19 @@
         visualPad.receiveShadow = true;
         this.group.add(visualPad);
 
+        const cooldownBar = new THREE.Mesh(this.cooldownBarGeometry, this.cooldownBarBaseMaterial.clone());
+        cooldownBar.rotation.x = -Math.PI * 0.5;
+        cooldownBar.position.set(slotX - 0.68, 0.028, this.layoutBaseZ + 0.78);
+        cooldownBar.scale.set(0.0001, 1, 1);
+        cooldownBar.visible = false;
+        this.group.add(cooldownBar);
+
         this.interactiveMeshes.push(clickPad);
         this.slots.set(config.id, {
           id: config.id,
           clickPad,
           visualPad,
+          cooldownBar,
           anchor: new THREE.Vector3(slotX, 1.02, this.layoutBaseZ),
           disabled: false,
           locked: false,
@@ -2496,10 +2515,16 @@
         if (slot.visualPad) {
           slot.visualPad.position.set(slotX, 0.02, this.layoutBaseZ);
         }
+        if (slot.cooldownBar) {
+          slot.cooldownBar.position.set(slotX - 0.68, 0.028, this.layoutBaseZ + 0.78);
+        }
         slot.visible = true;
         slot.clickPad.visible = true;
         if (slot.visualPad) {
           slot.visualPad.visible = true;
+        }
+        if (slot.cooldownBar) {
+          slot.cooldownBar.visible = false;
         }
       }
       for (const slot of this.slots.values()) {
@@ -2510,6 +2535,9 @@
         slot.clickPad.visible = false;
         if (slot.visualPad) {
           slot.visualPad.visible = false;
+        }
+        if (slot.cooldownBar) {
+          slot.cooldownBar.visible = false;
         }
       }
       for (const slot of this.slots.values()) {
@@ -2542,6 +2570,9 @@
         slot.clickPad.position.set(layout.x, 0.5, layout.z);
         if (slot.visualPad) {
           slot.visualPad.position.set(layout.x, 0.02, layout.z);
+        }
+        if (slot.cooldownBar) {
+          slot.cooldownBar.position.set(layout.x - 0.68, 0.028, layout.z + 0.78);
         }
         slot.visible = layout.visible;
         slot.clickPad.visible = layout.visible;
@@ -2606,13 +2637,37 @@
       }
     }
 
+    setCooldown(active, progress, activeId = null) {
+      this.cooldownActive = Boolean(active);
+      this.cooldownProgress = THREE.MathUtils.clamp(Number(progress) || 0, 0, 1);
+      this.cooldownActiveId = activeId || null;
+      for (const slot of this.slots.values()) {
+        this.applySlotState(slot);
+      }
+    }
+
     applySlotState(slot) {
-      const blocked = slot.disabled || slot.locked || !slot.visible;
+      const inCooldown = this.cooldownActive && slot.visible;
+      const blocked = slot.disabled || slot.locked || !slot.visible || inCooldown;
       slot.clickPad.userData.blocked = blocked;
       if (slot.visualPad && slot.visualPad.material) {
         const material = slot.visualPad.material;
-        material.opacity = blocked ? 0.56 : 0.9;
-        material.color.setHex(blocked ? 0x0a0a0d : 0x111116);
+        const ready = !blocked;
+        material.opacity = ready ? 0.35 : 0.3;
+        material.color.setHex(ready ? 0x63ff7d : 0x8f9499);
+      }
+      if (slot.cooldownBar) {
+        const showCooldown = this.cooldownActive && slot.visible;
+        slot.cooldownBar.visible = showCooldown;
+        if (showCooldown) {
+          const p = THREE.MathUtils.clamp(this.cooldownProgress, 0, 1);
+          slot.cooldownBar.scale.x = Math.max(0.0001, p);
+          const baseX = slot.anchor.x - 0.68;
+          slot.cooldownBar.position.x = baseX + (p * 0.68);
+          if (slot.cooldownBar.material) {
+            slot.cooldownBar.material.opacity = 0.42 + (p * 0.36);
+          }
+        }
       }
     }
 
@@ -2730,6 +2785,7 @@
       this.onCycleFinish = options.onCycleFinish;
 
       this.state = 'idle';
+      this.zoneVisible = true;
       this.phaseTime = 0;
       this.spawnTimer = 0;
       this.stickyLane = null;
@@ -2777,7 +2833,7 @@
       this.mesh.add(this.countSprite);
 
       this.updateCountVisual();
-      this.mesh.visible = this.count > 0;
+      this.applyCarrierVisibility();
       this.scene.add(this.mesh);
     }
 
@@ -2893,10 +2949,40 @@
       return this.count;
     }
 
+    isCycleActive() {
+      return this.state === 'launching'
+        || this.state === 'dispatching'
+        || this.state === 'returning';
+    }
+
+    getCycleProgress() {
+      if (this.state === 'launching') {
+        const p = this.launchDuration > 1e-6 ? (this.phaseTime / this.launchDuration) : 1;
+        return THREE.MathUtils.clamp(p * 0.15, 0, 0.15);
+      }
+      if (this.state === 'dispatching') {
+        const p = this.currentDispatchDuration > 1e-6 ? (this.phaseTime / this.currentDispatchDuration) : 1;
+        return THREE.MathUtils.clamp(0.15 + (p * 0.7), 0.15, 0.85);
+      }
+      if (this.state === 'returning') {
+        const p = this.returnDuration > 1e-6 ? (this.phaseTime / this.returnDuration) : 1;
+        return THREE.MathUtils.clamp(0.85 + (p * 0.15), 0.85, 1);
+      }
+      return 0;
+    }
+
+    applyCarrierVisibility() {
+      this.mesh.visible = this.count > 0 && (this.zoneVisible || this.isCycleActive());
+    }
+
+    setZoneVisible(visible) {
+      this.zoneVisible = Boolean(visible);
+      this.applyCarrierVisibility();
+    }
+
     setCount(count) {
       const next = Math.max(0, Math.floor(Number(count) || 0));
       this.count = next;
-      this.mesh.visible = next > 0;
       if (next > 0 && this.state === 'depleted') {
         this.state = 'idle';
         this.mesh.position.copy(this.uiAnchor);
@@ -2904,6 +2990,7 @@
         this.mesh.rotation.set(0, this.idleRotationY + this.idleYawOffsetRad, 0);
       }
       this.updateCountVisual();
+      this.applyCarrierVisibility();
     }
 
     startCycle() {
@@ -2920,6 +3007,7 @@
       this.stickyLane = null;
 
       this.launchFrom.copy(this.mesh.position);
+      this.applyCarrierVisibility();
 
       return true;
     }
@@ -3051,12 +3139,12 @@
         this.mesh.rotation.set(0, 0, 0);
         if (this.count <= 0) {
           this.state = 'depleted';
-          this.mesh.visible = false;
         } else {
           this.state = 'idle';
           this.mesh.position.copy(this.uiAnchor);
           this.mesh.position.y += 0.52;
         }
+        this.applyCarrierVisibility();
 
         if (this.onCycleFinish) {
           this.onCycleFinish(this.id);
@@ -4418,16 +4506,16 @@
   const DEG_TO_RAD = Math.PI / 180;
   const DEFAULT_CAMERA_DEBUG = {
     useLookAt: true,
-    position: { x: 50.1, y: 53.9, z: 0 },
+    position: { x: 52.9, y: 43.7, z: 0 },
     rotationDeg: {
-      x: -47.862405226111754,
-      y: 90.00000000000003,
-      z: -9.481268497239976e-15,
+      x: -90,
+      y: 49.564,
+      z: 90,
     },
-    target: { x: 0.7, y: -0.7, z: 0 },
-    fov: 15,
-    near: 0.1,
-    far: 100.1,
+    target: { x: 1.5, y: -0.1, z: 0 },
+    fov: 17.4,
+    near: 0.12,
+    far: 99.6,
     zoom: 1.18,
     focus: 9.8,
     filmGauge: 0,
@@ -5636,6 +5724,7 @@
         || zone === 'hidden'
         || (zone === 'back' && frontIsFull)
         || (activeBlockId !== null && activeBlockId !== id);
+      controller.setZoneVisible(zone !== 'hidden');
       worldInventory.setDisabled(id, disabled);
       worldInventory.setCount(id, controller.getCount());
     }
@@ -6448,6 +6537,16 @@
     ensureDoorShowcaseNearMinecart(scene, minecart);
     for (const controller of blocks.values()) {
       controller.update(dt);
+    }
+    if (activeBlockId) {
+      const activeController = blocks.get(activeBlockId) || null;
+      if (activeController && activeController.isCycleActive()) {
+        worldInventory.setCooldown(true, activeController.getCycleProgress(), activeBlockId);
+      } else {
+        worldInventory.setCooldown(false, 0, null);
+      }
+    } else {
+      worldInventory.setCooldown(false, 0, null);
     }
     const builtCountNow = buildManager.getBuiltCount();
     if (builtCountNow !== lastBuiltCount) {
