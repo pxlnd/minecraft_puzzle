@@ -72,3 +72,8 @@ TODO / next:
 - 2026-03-23: Вода переработана под поведение "1x1 источник": при установке не заполняет область мгновенно.
 - Исправлен материал воды: блок `water` игнорирует выбранную texture map, поэтому больше не становится камнем.
 - Поток воды теперь пошаговый (`simulateWaterStep`): сначала вниз по 1 клетке, боковое растекание только при наличии замкнутых стен/опоры (контейнер), чтобы не было резкого расползания на открытой поверхности.
+- 2026-03-25: Добавлен отдельный mobile camera preset в Debug > Camera: переключатель `Mobile Preset` + параметры `M Dist x`, `M Height`, `M FOV x`, `M Max FOV`.
+- Пресет применяется только на тач-устройствах в портретной ориентации; коэффициенты теперь настраиваемые и сохраняются в scene snapshot (`mobileCameraPreset`) через localStorage/export/import scene.
+- Добавлена базовая mobile-верстка viewport-fit (`index.html`) и безопасный sizing canvas через `visualViewport` (`js/game/app.js`) + `100dvh`/`touch-action:none` (`styles.css`).
+- Проверка `node --check js/game/app.js` успешна.
+- Playwright-прогон через `web_game_playwright_client.js` не завершился: `page.goto Timeout 30000ms` (в логах локальный сервер отдаёт `index.html`, `styles.css`, `app.js`; вероятно зависание загрузки внешних CDN-скриптов Three.js в окружении).

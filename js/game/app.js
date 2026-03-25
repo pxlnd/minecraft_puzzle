@@ -4464,10 +4464,30 @@
   const BLOCK_TYPE_SET = new Set(BLOCK_LIBRARY.map((blockDef) => blockDef.id));
   let activeLevelId = INITIAL_LEVEL_DATA.id;
 
+  function getViewportSize() {
+    const vv = window.visualViewport;
+    const width = vv && Number.isFinite(vv.width) ? vv.width : window.innerWidth;
+    const height = vv && Number.isFinite(vv.height) ? vv.height : window.innerHeight;
+    return {
+      width: Math.max(1, Math.round(width)),
+      height: Math.max(1, Math.round(height)),
+    };
+  }
+
+  function isCoarsePointerDevice() {
+    return window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  }
+
+  function isPortraitViewport() {
+    const viewport = getViewportSize();
+    return viewport.height >= viewport.width;
+  }
+
   const canvas = document.getElementById('app');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  const initialViewport = getViewportSize();
+  renderer.setSize(initialViewport.width, initialViewport.height, false);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -4475,7 +4495,7 @@
   scene.background = new THREE.Color(0x6e9f57);
   scene.fog = null;
 
-  const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 120);
+  const camera = new THREE.PerspectiveCamera(42, initialViewport.width / initialViewport.height, 0.1, 120);
   camera.position.set(14.5, 16, 14.5);
   camera.lookAt(0, 0, 0);
 
@@ -4595,7 +4615,7 @@
     z: -0.03,
     angleDeg: 90,
   };
-  let uiHidden = false;
+  let uiHidden = true;
   let flyCamEnabled = false;
   let flyCamRestoreState = null;
   let syncCameraInputsFromState = null;
@@ -4640,6 +4660,15 @@
     filmGauge: 0,
     filmOffset: 0,
   };
+  const DEFAULT_MOBILE_CAMERA_PRESET = {
+    enabled: true,
+    distanceMultiplier: 0.8,
+    extraHeight: 12,
+    fovMultiplier: 1.21,
+    maxFov: 53.7,
+    maxZoom: 1,
+  };
+  let mobileCameraPreset = { ...DEFAULT_MOBILE_CAMERA_PRESET };
   const cameraDebugState = JSON.parse(JSON.stringify(DEFAULT_CAMERA_DEBUG));
 
   function toFiniteNumber(value, fallback) {
@@ -4654,6 +4683,38 @@
     }
     const wrapped = ((raw % 360) + 360) % 360;
     return Math.round(wrapped);
+  }
+
+  function normalizeMobileCameraPreset(raw) {
+    const source = raw && typeof raw === 'object' ? raw : {};
+    return {
+      enabled: source.enabled !== undefined ? Boolean(source.enabled) : DEFAULT_MOBILE_CAMERA_PRESET.enabled,
+      distanceMultiplier: THREE.MathUtils.clamp(
+        toFiniteNumber(source.distanceMultiplier, DEFAULT_MOBILE_CAMERA_PRESET.distanceMultiplier),
+        0.8,
+        2.4,
+      ),
+      extraHeight: THREE.MathUtils.clamp(
+        toFiniteNumber(source.extraHeight, DEFAULT_MOBILE_CAMERA_PRESET.extraHeight),
+        -2,
+        12,
+      ),
+      fovMultiplier: THREE.MathUtils.clamp(
+        toFiniteNumber(source.fovMultiplier, DEFAULT_MOBILE_CAMERA_PRESET.fovMultiplier),
+        1,
+        3,
+      ),
+      maxFov: THREE.MathUtils.clamp(
+        toFiniteNumber(source.maxFov, DEFAULT_MOBILE_CAMERA_PRESET.maxFov),
+        20,
+        120,
+      ),
+      maxZoom: THREE.MathUtils.clamp(
+        toFiniteNumber(source.maxZoom, DEFAULT_MOBILE_CAMERA_PRESET.maxZoom),
+        0.3,
+        2,
+      ),
+    };
   }
 
   function exportCameraDebugState() {
@@ -4684,35 +4745,78 @@
     };
   }
 
+  function getResponsiveCameraSettings(rawSettings) {
+    if (!rawSettings) {
+      return null;
+    }
+    const shouldAdaptPortrait = mobileCameraPreset.enabled && isCoarsePointerDevice() && isPortraitViewport();
+    if (!shouldAdaptPortrait) {
+      return rawSettings;
+    }
+
+    const target = {
+      x: toFiniteNumber(rawSettings.target && rawSettings.target.x, DEFAULT_CAMERA_DEBUG.target.x),
+      y: toFiniteNumber(rawSettings.target && rawSettings.target.y, DEFAULT_CAMERA_DEBUG.target.y),
+      z: toFiniteNumber(rawSettings.target && rawSettings.target.z, DEFAULT_CAMERA_DEBUG.target.z),
+    };
+    const sourcePos = {
+      x: toFiniteNumber(rawSettings.position && rawSettings.position.x, DEFAULT_CAMERA_DEBUG.position.x),
+      y: toFiniteNumber(rawSettings.position && rawSettings.position.y, DEFAULT_CAMERA_DEBUG.position.y),
+      z: toFiniteNumber(rawSettings.position && rawSettings.position.z, DEFAULT_CAMERA_DEBUG.position.z),
+    };
+    const offsetX = sourcePos.x - target.x;
+    const offsetY = sourcePos.y - target.y;
+    const offsetZ = sourcePos.z - target.z;
+
+    return {
+      ...rawSettings,
+      position: {
+        x: target.x + (offsetX * mobileCameraPreset.distanceMultiplier),
+        y: target.y + (offsetY * mobileCameraPreset.distanceMultiplier) + mobileCameraPreset.extraHeight,
+        z: target.z + (offsetZ * mobileCameraPreset.distanceMultiplier),
+      },
+      fov: THREE.MathUtils.clamp(
+        toFiniteNumber(rawSettings.fov, DEFAULT_CAMERA_DEBUG.fov) * mobileCameraPreset.fovMultiplier,
+        1,
+        mobileCameraPreset.maxFov,
+      ),
+      zoom: Math.min(
+        toFiniteNumber(rawSettings.zoom, DEFAULT_CAMERA_DEBUG.zoom),
+        mobileCameraPreset.maxZoom,
+      ),
+    };
+  }
+
   function applyCameraDebugState() {
+    const effectiveCamera = getResponsiveCameraSettings(exportCameraDebugState()) || exportCameraDebugState();
     camera.position.set(
-      toFiniteNumber(cameraDebugState.position.x, DEFAULT_CAMERA_DEBUG.position.x),
-      toFiniteNumber(cameraDebugState.position.y, DEFAULT_CAMERA_DEBUG.position.y),
-      toFiniteNumber(cameraDebugState.position.z, DEFAULT_CAMERA_DEBUG.position.z),
+      toFiniteNumber(effectiveCamera.position.x, DEFAULT_CAMERA_DEBUG.position.x),
+      toFiniteNumber(effectiveCamera.position.y, DEFAULT_CAMERA_DEBUG.position.y),
+      toFiniteNumber(effectiveCamera.position.z, DEFAULT_CAMERA_DEBUG.position.z),
     );
-    if (cameraDebugState.useLookAt) {
+    if (effectiveCamera.useLookAt) {
       camera.lookAt(
-        toFiniteNumber(cameraDebugState.target.x, DEFAULT_CAMERA_DEBUG.target.x),
-        toFiniteNumber(cameraDebugState.target.y, DEFAULT_CAMERA_DEBUG.target.y),
-        toFiniteNumber(cameraDebugState.target.z, DEFAULT_CAMERA_DEBUG.target.z),
+        toFiniteNumber(effectiveCamera.target.x, DEFAULT_CAMERA_DEBUG.target.x),
+        toFiniteNumber(effectiveCamera.target.y, DEFAULT_CAMERA_DEBUG.target.y),
+        toFiniteNumber(effectiveCamera.target.z, DEFAULT_CAMERA_DEBUG.target.z),
       );
       cameraDebugState.rotationDeg.x = camera.rotation.x * RAD_TO_DEG;
       cameraDebugState.rotationDeg.y = camera.rotation.y * RAD_TO_DEG;
       cameraDebugState.rotationDeg.z = camera.rotation.z * RAD_TO_DEG;
     } else {
       camera.rotation.set(
-        toFiniteNumber(cameraDebugState.rotationDeg.x, DEFAULT_CAMERA_DEBUG.rotationDeg.x) * DEG_TO_RAD,
-        toFiniteNumber(cameraDebugState.rotationDeg.y, DEFAULT_CAMERA_DEBUG.rotationDeg.y) * DEG_TO_RAD,
-        toFiniteNumber(cameraDebugState.rotationDeg.z, DEFAULT_CAMERA_DEBUG.rotationDeg.z) * DEG_TO_RAD,
+        toFiniteNumber(effectiveCamera.rotationDeg.x, DEFAULT_CAMERA_DEBUG.rotationDeg.x) * DEG_TO_RAD,
+        toFiniteNumber(effectiveCamera.rotationDeg.y, DEFAULT_CAMERA_DEBUG.rotationDeg.y) * DEG_TO_RAD,
+        toFiniteNumber(effectiveCamera.rotationDeg.z, DEFAULT_CAMERA_DEBUG.rotationDeg.z) * DEG_TO_RAD,
       );
     }
-    camera.fov = THREE.MathUtils.clamp(toFiniteNumber(cameraDebugState.fov, DEFAULT_CAMERA_DEBUG.fov), 1, 179);
-    camera.near = Math.max(0.01, toFiniteNumber(cameraDebugState.near, DEFAULT_CAMERA_DEBUG.near));
-    camera.far = Math.max(camera.near + 0.01, toFiniteNumber(cameraDebugState.far, DEFAULT_CAMERA_DEBUG.far));
-    camera.zoom = Math.max(0.01, toFiniteNumber(cameraDebugState.zoom, DEFAULT_CAMERA_DEBUG.zoom));
-    camera.focus = Math.max(0.01, toFiniteNumber(cameraDebugState.focus, DEFAULT_CAMERA_DEBUG.focus));
-    camera.filmGauge = Math.max(1, toFiniteNumber(cameraDebugState.filmGauge, DEFAULT_CAMERA_DEBUG.filmGauge));
-    camera.filmOffset = toFiniteNumber(cameraDebugState.filmOffset, DEFAULT_CAMERA_DEBUG.filmOffset);
+    camera.fov = THREE.MathUtils.clamp(toFiniteNumber(effectiveCamera.fov, DEFAULT_CAMERA_DEBUG.fov), 1, 179);
+    camera.near = Math.max(0.01, toFiniteNumber(effectiveCamera.near, DEFAULT_CAMERA_DEBUG.near));
+    camera.far = Math.max(camera.near + 0.01, toFiniteNumber(effectiveCamera.far, DEFAULT_CAMERA_DEBUG.far));
+    camera.zoom = Math.max(0.01, toFiniteNumber(effectiveCamera.zoom, DEFAULT_CAMERA_DEBUG.zoom));
+    camera.focus = Math.max(0.01, toFiniteNumber(effectiveCamera.focus, DEFAULT_CAMERA_DEBUG.focus));
+    camera.filmGauge = Math.max(1, toFiniteNumber(effectiveCamera.filmGauge, DEFAULT_CAMERA_DEBUG.filmGauge));
+    camera.filmOffset = toFiniteNumber(effectiveCamera.filmOffset, DEFAULT_CAMERA_DEBUG.filmOffset);
     camera.updateProjectionMatrix();
   }
 
@@ -5181,7 +5285,7 @@
     const safeRails = currentRails.length > 0 ? currentRails : getDefaultUserRails();
     const inventoryPos = worldInventory.getGroupPosition(TEMP_A);
     return {
-      version: 5,
+      version: 6,
       levelId: activeLevelId,
       blocks: getEditorBlocksSnapshot(),
       build: getBuildSettingsSnapshot(),
@@ -5197,6 +5301,7 @@
         spinAngleDeg: normalizeSpinAngleDeg(inventorySpinAngleDeg),
       },
       camera: exportCameraDebugState(),
+      mobileCameraPreset: { ...mobileCameraPreset },
     };
   }
 
@@ -5599,6 +5704,7 @@
       ? normalizeSpinAngleDeg(raw.inventory.spinAngleDeg)
       : DEFAULT_INVENTORY_ZONE.angleDeg;
     const cameraSettings = normalizeCameraSettings(raw.camera);
+    const mobilePreset = normalizeMobileCameraPreset(raw.mobileCameraPreset);
     const effectiveBlocks = hasBlocksField ? blocks : normalizeBlocks(levelData.blocks);
     const effectiveBuildTargetBlocks = hasBuildTargetField
       ? buildTargetBlocks
@@ -5617,6 +5723,7 @@
       },
       inventorySpinAngleDeg,
       camera: cameraSettings || normalizeCameraSettings(levelData.camera),
+      mobileCameraPreset: mobilePreset,
     };
   }
 
@@ -5717,10 +5824,11 @@
         inventoryZoneX = normalized.inventoryPosition.x;
         inventoryZoneZ = normalized.inventoryPosition.z;
         inventorySpinAngleDeg = normalizeSpinAngleDeg(normalized.inventorySpinAngleDeg);
+        mobileCameraPreset = normalizeMobileCameraPreset(normalized.mobileCameraPreset);
         if (normalized.camera) {
           Object.assign(cameraDebugState, normalized.camera);
-          applyCameraDebugState();
         }
+        applyCameraDebugState();
         return true;
       }
     } catch (error) {
@@ -6273,6 +6381,11 @@
     const cameraFlyEnabledInput = document.getElementById('cam-fly-enabled');
     const winCamEnabledInput = document.getElementById('cam-win-enabled');
     const winCamDistanceInput = document.getElementById('cam-win-distance');
+    const mobileCamEnabledInput = document.getElementById('cam-mobile-enabled');
+    const mobileCamDistanceInput = document.getElementById('cam-mobile-distance');
+    const mobileCamHeightInput = document.getElementById('cam-mobile-height');
+    const mobileCamFovInput = document.getElementById('cam-mobile-fov');
+    const mobileCamMaxFovInput = document.getElementById('cam-mobile-max-fov');
     const cameraLookAtEnabledInput = document.getElementById('cam-lookat-enabled');
     const cameraPosXInput = document.getElementById('cam-pos-x');
     const cameraPosYInput = document.getElementById('cam-pos-y');
@@ -6424,6 +6537,21 @@
       if (winCamDistanceInput) {
         winCamDistanceInput.value = winCamDistance.toFixed(2);
       }
+      if (mobileCamEnabledInput) {
+        mobileCamEnabledInput.checked = Boolean(mobileCameraPreset.enabled);
+      }
+      if (mobileCamDistanceInput) {
+        mobileCamDistanceInput.value = mobileCameraPreset.distanceMultiplier.toFixed(2);
+      }
+      if (mobileCamHeightInput) {
+        mobileCamHeightInput.value = mobileCameraPreset.extraHeight.toFixed(2);
+      }
+      if (mobileCamFovInput) {
+        mobileCamFovInput.value = mobileCameraPreset.fovMultiplier.toFixed(2);
+      }
+      if (mobileCamMaxFovInput) {
+        mobileCamMaxFovInput.value = mobileCameraPreset.maxFov.toFixed(2);
+      }
       cameraLookAtEnabledInput.checked = Boolean(cameraDebugState.useLookAt);
       cameraPosXInput.value = cameraDebugState.position.x.toFixed(3);
       cameraPosYInput.value = cameraDebugState.position.y.toFixed(3);
@@ -6464,6 +6592,21 @@
       cameraDebugState.focus = toFiniteNumber(cameraFocusInput.value, cameraDebugState.focus);
       cameraDebugState.filmGauge = toFiniteNumber(cameraFilmGaugeInput.value, cameraDebugState.filmGauge);
       cameraDebugState.filmOffset = toFiniteNumber(cameraFilmOffsetInput.value, cameraDebugState.filmOffset);
+      applyCameraDebugState();
+      setCameraInputsFromState();
+      saveSceneLayout();
+    }
+
+    function commitMobileCameraPresetFromInputs() {
+      const nextPreset = normalizeMobileCameraPreset({
+        enabled: mobileCamEnabledInput ? mobileCamEnabledInput.checked : mobileCameraPreset.enabled,
+        distanceMultiplier: mobileCamDistanceInput ? mobileCamDistanceInput.value : mobileCameraPreset.distanceMultiplier,
+        extraHeight: mobileCamHeightInput ? mobileCamHeightInput.value : mobileCameraPreset.extraHeight,
+        fovMultiplier: mobileCamFovInput ? mobileCamFovInput.value : mobileCameraPreset.fovMultiplier,
+        maxFov: mobileCamMaxFovInput ? mobileCamMaxFovInput.value : mobileCameraPreset.maxFov,
+        maxZoom: mobileCameraPreset.maxZoom,
+      });
+      mobileCameraPreset = nextPreset;
       applyCameraDebugState();
       setCameraInputsFromState();
       saveSceneLayout();
@@ -6574,11 +6717,12 @@
       if (inventoryZoneZInput) {
         inventoryZoneZInput.value = inventoryZoneZ.toFixed(2);
       }
+      mobileCameraPreset = normalizeMobileCameraPreset(normalized.mobileCameraPreset);
       if (normalized.camera) {
         Object.assign(cameraDebugState, normalized.camera);
-        applyCameraDebugState();
-        setCameraInputsFromState();
       }
+      applyCameraDebugState();
+      setCameraInputsFromState();
       minecart.snapToNearestPoint(new THREE.Vector3(9.8, trackController.pathY, 0));
       syncBlockCountsFromLevel();
       refreshUiLockState();
@@ -6895,6 +7039,19 @@
       winCamDistanceInput.addEventListener('change', applyWinCamDistance);
     }
     for (const input of [
+      mobileCamEnabledInput,
+      mobileCamDistanceInput,
+      mobileCamHeightInput,
+      mobileCamFovInput,
+      mobileCamMaxFovInput,
+    ]) {
+      if (!input) {
+        continue;
+      }
+      input.addEventListener('input', commitMobileCameraPresetFromInputs);
+      input.addEventListener('change', commitMobileCameraPresetFromInputs);
+    }
+    for (const input of [
       cameraLookAtEnabledInput,
       cameraPosXInput,
       cameraPosYInput,
@@ -7137,11 +7294,18 @@
     }
   };
 
-  window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
+  function resizeRendererToViewport() {
+    const viewport = getViewportSize();
+    camera.aspect = viewport.width / viewport.height;
+    applyCameraDebugState();
     camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
+    renderer.setSize(viewport.width, viewport.height, false);
+  }
+
+  window.addEventListener('resize', resizeRendererToViewport);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', resizeRendererToViewport);
+  }
 
   canvas.addEventListener('pointermove', (event) => {
     if (draggingInventory) {
