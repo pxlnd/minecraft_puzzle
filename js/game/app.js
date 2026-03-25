@@ -4,6 +4,7 @@
   const IMPACT_BURST_GEOMETRY = new THREE.SphereGeometry(1, 8, 8);
   const IMPACT_RING_GEOMETRY = new THREE.RingGeometry(0.55, 0.78, 28);
   const UNAVAILABLE_FLASH_COLOR = new THREE.Color(0xff4747);
+  const PUZZLE_GHOST_TINT = new THREE.Color(0xc3ccd6);
 
   const TEMP_A = new THREE.Vector3();
   const TEMP_B = new THREE.Vector3();
@@ -1779,8 +1780,12 @@
       this.createMaterial = options.createMaterial;
       this.slots = [];
       this.builtMeshes = [];
+      this.ghostMeshes = new Map();
       this.shadowPlane = null;
       this.center = new THREE.Vector3(0, this.baseY, 0);
+      this.currentPromptInventoryKey = null;
+      this.visualsVisible = true;
+      this.promptPreviewEnabled = true;
     }
 
     resolveInventoryKey(type, textureKey) {
@@ -1808,6 +1813,8 @@
         disposeObject3D(mesh);
       }
       this.builtMeshes = [];
+      this.clearGhosts();
+      this.currentPromptInventoryKey = null;
       if (this.shadowPlane) {
         this.scene.remove(this.shadowPlane);
         disposeObject3D(this.shadowPlane);
@@ -1915,6 +1922,93 @@
         this.scene.add(catcher);
         this.shadowPlane = catcher;
       }
+
+      this.refreshPromptGhosts();
+    }
+
+    clearGhosts() {
+      for (const ghostMesh of this.ghostMeshes.values()) {
+        this.scene.remove(ghostMesh);
+        disposeObject3D(ghostMesh);
+      }
+      this.ghostMeshes.clear();
+    }
+
+    removeGhostByIndex(index) {
+      const ghost = this.ghostMeshes.get(index);
+      if (!ghost) {
+        return;
+      }
+      this.scene.remove(ghost);
+      disposeObject3D(ghost);
+      this.ghostMeshes.delete(index);
+    }
+
+    getCurrentPromptInventoryKey() {
+      const freeIds = [];
+      const seen = new Set();
+      for (const slot of this.getCurrentLayerFreeSlotsOrdered()) {
+        if (!slot || !slot.inventoryKey || seen.has(slot.inventoryKey)) {
+          continue;
+        }
+        seen.add(slot.inventoryKey);
+        freeIds.push(slot.inventoryKey);
+      }
+      if (freeIds.length === 0) {
+        this.currentPromptInventoryKey = null;
+        return null;
+      }
+      if (!this.currentPromptInventoryKey || !freeIds.includes(this.currentPromptInventoryKey)) {
+        this.currentPromptInventoryKey = freeIds[0];
+      }
+      return this.currentPromptInventoryKey;
+    }
+
+    refreshPromptGhosts() {
+      this.clearGhosts();
+      if (!this.promptPreviewEnabled) {
+        return;
+      }
+      const promptInventoryKey = this.getCurrentPromptInventoryKey();
+      if (!promptInventoryKey) {
+        return;
+      }
+      const layerY = this.getCurrentLayerFreeY();
+      if (!Number.isFinite(layerY)) {
+        return;
+      }
+      const EPS_Y = this.cellSize * 0.01;
+      for (let i = 0; i < this.slots.length; i += 1) {
+        const slot = this.slots[i];
+        if (!slot || slot.state !== 'free') {
+          continue;
+        }
+        if (slot.inventoryKey !== promptInventoryKey) {
+          continue;
+        }
+        if (slot.position.y > layerY + EPS_Y) {
+          continue;
+        }
+
+        const ghost = new THREE.Mesh(
+          new THREE.BoxGeometry(this.cellSize * 0.98, this.cellSize * 0.98, this.cellSize * 0.98),
+          this.createMaterial(slot.type, 0xffffff, { textureKey: slot.textureKey }),
+        );
+        applyPuzzleGhostVisual(ghost);
+        ghost.position.copy(slot.position);
+        ghost.visible = this.visualsVisible;
+        this.scene.add(ghost);
+        this.ghostMeshes.set(i, ghost);
+      }
+    }
+
+    setPromptPreviewEnabled(enabled) {
+      this.promptPreviewEnabled = Boolean(enabled);
+      if (!this.promptPreviewEnabled) {
+        this.clearGhosts();
+        return;
+      }
+      this.refreshPromptGhosts();
     }
 
     reserveNext(inventoryKey, origin = null, forward = null, laneLock = null) {
@@ -2183,6 +2277,7 @@
       }
 
       slot.state = 'built';
+      this.removeGhostByIndex(index);
 
       const mesh = createBlockMesh(
         slot.type,
@@ -2326,8 +2421,12 @@
 
     setVisible(visible) {
       const isVisible = Boolean(visible);
+      this.visualsVisible = isVisible;
       for (const mesh of this.builtMeshes) {
         mesh.visible = isVisible;
+      }
+      for (const ghostMesh of this.ghostMeshes.values()) {
+        ghostMesh.visible = isVisible;
       }
       if (this.shadowPlane) {
         this.shadowPlane.visible = isVisible;
@@ -2844,6 +2943,60 @@
       alphaTest: 0,
       side: isDoor ? THREE.DoubleSide : THREE.FrontSide,
       depthWrite: isWater ? true : !isWater,
+    });
+  }
+
+  function applyPuzzleGhostVisual(root) {
+    if (!root || typeof root.traverse !== 'function') {
+      return;
+    }
+    root.traverse((node) => {
+      if (!node || !node.isMesh || !node.material) {
+        return;
+      }
+      const materials = Array.isArray(node.material) ? node.material : [node.material];
+      for (const material of materials) {
+        if (!material || typeof material !== 'object') {
+          continue;
+        }
+        if (material.color && typeof material.color.lerp === 'function') {
+          material.color.lerp(PUZZLE_GHOST_TINT, 0.38);
+        }
+        if ('roughness' in material && Number.isFinite(material.roughness)) {
+          material.roughness = Math.min(1, material.roughness + 0.18);
+        }
+        if ('metalness' in material && Number.isFinite(material.metalness)) {
+          material.metalness = Math.max(0, material.metalness * 0.35);
+        }
+        if ('transparent' in material) {
+          material.transparent = true;
+        }
+        if ('opacity' in material && Number.isFinite(material.opacity)) {
+          material.opacity = Math.min(material.opacity, 0.52);
+        } else if ('opacity' in material) {
+          material.opacity = 0.52;
+        }
+        if ('depthWrite' in material) {
+          material.depthWrite = false;
+        }
+        if ('alphaTest' in material) {
+          material.alphaTest = 0;
+        }
+        if (material.emissive && typeof material.emissive.setHex === 'function') {
+          material.emissive.setHex(0x1f3244);
+        }
+        if ('emissiveIntensity' in material) {
+          material.emissiveIntensity = 0.24;
+        }
+        material.needsUpdate = true;
+      }
+      if (node.castShadow !== undefined) {
+        node.castShadow = false;
+      }
+      if (node.receiveShadow !== undefined) {
+        node.receiveShadow = false;
+      }
+      node.renderOrder = 2;
     });
   }
 
@@ -4609,7 +4762,11 @@
   }
   const debugEditor = document.getElementById('debug-editor');
   const winBanner = document.getElementById('win-banner');
+  const livesHud = document.getElementById('lives-hud');
+  const livesValue = document.getElementById('lives-value');
   const inventoryMoveEnabledInput = document.getElementById('inventory-move-enabled');
+  const MAX_PLAYER_LIVES = 3;
+  let playerLives = MAX_PLAYER_LIVES;
   const DEFAULT_INVENTORY_ZONE = {
     x: 19.17,
     z: -0.03,
@@ -5230,7 +5387,7 @@
     debugEditor.style.display = uiHidden ? 'none' : '';
     const visible = !uiHidden;
     editor.setVisible(visible);
-    buildManager.setVisible(visible);
+    buildManager.setVisible(true);
   }
 
   function setWinBannerVisible(visible) {
@@ -5240,6 +5397,30 @@
     const isVisible = Boolean(visible);
     winBanner.classList.toggle('is-visible', isVisible);
     winBanner.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+  }
+
+  function syncLivesHud() {
+    if (livesValue) {
+      livesValue.textContent = String(playerLives);
+    }
+    if (livesHud) {
+      livesHud.classList.toggle('is-empty', playerLives <= 0);
+    }
+  }
+
+  function resetPlayerLives() {
+    playerLives = MAX_PLAYER_LIVES;
+    syncLivesHud();
+  }
+
+  function loseLife() {
+    playerLives = Math.max(0, playerLives - 1);
+    syncLivesHud();
+    if (livesHud) {
+      livesHud.classList.remove('is-hit');
+      void livesHud.offsetWidth;
+      livesHud.classList.add('is-hit');
+    }
   }
 
   function getEditorBlocksSnapshot() {
@@ -5896,6 +6077,7 @@
     }
   }
   minecart.snapToNearestPoint(new THREE.Vector3(9.8, trackController.pathY, 0));
+  resetPlayerLives();
   ensureDoorModelLoading();
   removeDoorShowcase(scene);
   ensureDoorShowcaseNearMinecart(scene, minecart);
@@ -6096,6 +6278,12 @@
     if (!controller) {
       return;
     }
+    const promptInventoryKey = buildManager.getCurrentPromptInventoryKey();
+    if (promptInventoryKey && id !== promptInventoryKey) {
+      loseLife();
+      controller.triggerUnavailableFeedback();
+      return;
+    }
 
     const zone = getInventoryZone(id);
     if (zone !== 'front' && zone !== 'back') {
@@ -6119,6 +6307,7 @@
     if (!started) {
       return;
     }
+    buildManager.setPromptPreviewEnabled(false);
 
     if (zone === 'back') {
       const freeFrontSlot = getFirstFreeFrontSlotIndex();
@@ -6141,6 +6330,7 @@
     if (activeBlockId === id) {
       activeBlockId = null;
     }
+    buildManager.setPromptPreviewEnabled(true);
     if (pendingBackToFrontId === id && pendingBackToFrontSlot >= 0) {
       const slotIndex = pendingBackToFrontSlot;
       const backIndex = findBackSlotIndexById(id);
@@ -6264,6 +6454,7 @@
     pendingClickBlockId = null;
     pendingQueueLayoutRefresh = false;
     minecart.stop();
+    buildManager.setPromptPreviewEnabled(true);
     buildManager.commitAll();
     syncBlockCountsFromLevel();
     refreshUiLockState();
@@ -6300,6 +6491,7 @@
       }
       controller.setCount(count);
     }
+    buildManager.refreshPromptGhosts();
     if (activeBlockId !== null || minecart.isMoving()) {
       pendingQueueLayoutRefresh = true;
     } else {
@@ -6645,6 +6837,7 @@
     function loadSelectedLevel(levelId) {
       const levelData = cloneLevelData(LEVELS_BY_ID.get(levelId) || INITIAL_LEVEL_DATA);
       activeLevelId = levelData.id;
+      resetPlayerLives();
       const levelRails = normalizeRails(levelData.rails);
 
       const sceneData = {
@@ -6682,6 +6875,7 @@
         return false;
       }
       activeLevelId = normalized.levelId;
+      resetPlayerLives();
       const sceneData = {
         blocks: normalized.blocks,
         rails: normalized.rails,
@@ -7282,6 +7476,7 @@
         built: buildManager.getBuiltCount(),
         total: buildManager.getTotalCount(),
       },
+      lives: playerLives,
       camera: exportCameraDebugState(),
     };
     return JSON.stringify(payload);
@@ -7445,6 +7640,11 @@
     flyLookActive = false;
     clearFlyMoveState();
   });
+  if (livesHud) {
+    livesHud.addEventListener('animationend', () => {
+      livesHud.classList.remove('is-hit');
+    });
+  }
 
   syncBlockCountsFromLevel();
   refreshUiLockState();
